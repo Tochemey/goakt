@@ -54,9 +54,9 @@
 
 ## 20.1 The engine and what it delegates
 
-The cluster core is one type, `cluster` in `internal/cluster/cluster.go`, behind the `Cluster` interface in the same file. The actor system holds it as `x.cluster` and never talks to Olric directly. Discovery providers, the memberlist transport and the network profiles that tune failure detection are configured by this engine but explained in [Chapter 19](chap-19.md); placement, singletons and relocation are built on it and explained in [Chapter 21](chap-21.md).
+The cluster core is one type, `cluster` in `internal/cluster/cluster.go`, behind the `Cluster` interface in the same file. The actor system ([Chapter 3](chap-03.md)) holds it as `x.cluster` and never talks to Olric directly. Discovery providers, the memberlist transport and the network profiles that tune failure detection are configured by this engine but explained in [Chapter 19](chap-19.md); placement, singletons and relocation are built on it and explained in [Chapter 21](chap-21.md).
 
-The engine embeds an Olric server in the process: the module `github.com/tochemey/olric`, at v0.3.22 in `go.mod`. Olric source files are cited below by their path inside that module. Olric gives the engine everything distributed (`book/architecture.md`, "Why Olric for cluster state"):
+The engine embeds an Olric server in the process: the module `github.com/tochemey/olric`, at v0.3.24 in `go.mod`. Olric source files are cited below by their path inside that module. Olric gives the engine everything distributed (`book/architecture.md`, "Why Olric for cluster state"):
 
 | Olric provides | Used for |
 |---|---|
@@ -68,6 +68,18 @@ The engine embeds an Olric server in the process: the module `github.com/tocheme
 | A cluster events channel on its in-process, Redis-compatible pub/sub | membership events ([§20.9](#209-cluster-events)) |
 
 The engine adds GoAkt's key layout, its record encoding, the incarnation fence on actor records, the timeouts, the conversion of Olric's raw events into three stable event types, and the leader-change detection.
+
+```mermaid
+flowchart LR
+    AS["actor system<br/>x.cluster"] -->|"Cluster interface"| E["engine<br/>internal/cluster"]
+    E -->|"embedded client: goakt.dmap"| M["registry map<br/>actors, grains, locks, ..."]
+    E -->|"subscribe: cluster.events"| EV["events channel"]
+    E -->|"embedded client: Members"| ML["memberlist view<br/>peers, coordinator"]
+    M --- O["Olric server in the same process"]
+    EV --- O
+    ML --- O
+    E -->|"NodeJoined, NodeLeft, LeaderChanged"| AS
+```
 
 The `Cluster` interface groups its methods as follows:
 
@@ -86,7 +98,7 @@ Every registry and membership method except `Events` and `LastRebalanceEvent` fi
 
 ### `ClusterConfig`
 
-Users configure the cluster with `ClusterConfig` (`actor/cluster_config.go`), passed to `WithCluster` (`actor/option.go`). `NewClusterConfig` sets the defaults and registers `FuncActor` as a kind. `ClusterConfig.Validate` runs from `actorSystem.validate` in `actor/actor_system.go`, which `NewActorSystem` calls, so an invalid configuration fails construction; it collects every failed assertion, not only the first.
+Users configure the cluster with `ClusterConfig` (`actor/cluster_config.go`), passed to `WithCluster` (`actor/option.go`). `NewClusterConfig` sets the defaults and registers `FuncActor` ([Chapter 4, §4.8](chap-04.md#48-function-actors)) as a kind. `ClusterConfig.Validate` runs from `actorSystem.validate` in `actor/actor_system.go`, which `NewActorSystem` calls, so an invalid configuration fails construction; it collects every failed assertion, not only the first.
 
 | Option | Default | Validation | Effect |
 |---|---|---|---|
@@ -101,7 +113,7 @@ Users configure the cluster with `ClusterConfig` (`actor/cluster_config.go`), pa
 | `WithReplicaCount` | 2 | at least 1 | Olric's replica count; 1 logs a warning at setup |
 | `WithWriteQuorum` | 1 | at least 1 | Olric's write quorum |
 | `WithReadQuorum` | 1 | at least 1 | Olric's read quorum |
-| `WithMinimumPeersQuorum` | 1 | at least 1 | Olric's member-count quorum; also the member count the grain activation barrier waits for ([Chapter 13](chap-13.md)) |
+| `WithMinimumPeersQuorum` | 1 | at least 1 | Olric's member-count quorum; also the member count the grain activation barrier waits for ([Chapter 13, §13.6](chap-13.md#136-one-activation-per-identity)) |
 | `WithTableSize` | 4 MB | none | the `tableSize` of Olric's storage engine |
 | `WithWriteTimeout` | 1 s | none | bound on each registry write and on the wait for a record lock |
 | `WithReadTimeout` | 1 s | none | bound on each registry read |
@@ -111,18 +123,18 @@ Users configure the cluster with `ClusterConfig` (`actor/cluster_config.go`), pa
 | `WithClusterBalancerInterval` | 1 s (`DefaultClusterBalancerInterval`) | a non-positive value is ignored by the option | Olric's balancer interval |
 | `WithConvergenceTimeout` | 10 s (`DefaultClusterConvergenceTimeout`) | greater than 0 | the bounded wait of a membership event ([§20.9](#209-cluster-events)) |
 | `WithNetworkProfile` | `NetworkProfileLAN` | a defined profile | memberlist's failure-detection preset ([Chapter 19](chap-19.md)) |
-| `WithGrainActivationBarrier` | off | timeout not negative | [Chapter 13](chap-13.md) |
+| `WithGrainActivationBarrier` | off | timeout not negative | [Chapter 13, §13.6](chap-13.md#136-one-activation-per-identity) |
 | `WithStoreDir` | empty, meaning `~/.goakt/cluster` | none | where the peer-state file lives ([§20.12](#2012-the-peer-state-store)) |
 | `WithDataCenter` | none; nil is ignored | the datacenter configuration's own validation, when set | [Chapter 22](chap-22.md) |
 | `WithCRDT` | off | none | [Chapter 24](chap-24.md) |
 
 The defaults are in `NewClusterConfig` and the `DefaultCluster...` constants in `actor/defaults.go`.
 
-**Quorums are not checked against the replica count by `Validate`.** Olric's own `Config.Validate` (`github.com/tochemey/olric/config/config.go`) rejects a read or write quorum greater than the replica count when the engine creates its Olric instance, so such a configuration fails at `Start`, after the three bootstrap attempts of [§20.3](#203-start-and-stop), not at `NewActorSystem`. The default (two replicas, both quorums 1) deliberately does not satisfy `readQuorum + writeQuorum > replicaCount`. The comments on `WithReplicaCount`, `WithWriteQuorum` and `WithReadQuorum` give the reasons: the registry can be rebuilt, single activation is decided by the partition's primary owner rather than by overlapping quorums ([§20.6](#206-claims-fences-and-scans)), read repair heals replicas that missed a write, and quorums of 1 keep registry writes succeeding while a node is down. The comment on `WithReplicaCount` says the default of 2 keeps a backup of every partition, so the registry survives the loss of one node and registry-derived crash recovery stays complete; with 1, a crashed node's partitions are lost with it.
+**Quorums are not checked against the replica count by `Validate`.** Olric's own `Config.Validate` (`github.com/tochemey/olric/config/config.go`) rejects a read or write quorum greater than the replica count when the engine creates its Olric instance, so such a configuration fails at `Start`, after the three bootstrap attempts of [§20.3](#203-start-and-stop), not at `NewActorSystem`. The default (two replicas, both quorums 1) deliberately does not satisfy `readQuorum + writeQuorum > replicaCount`. The comments on `WithReplicaCount`, `WithWriteQuorum` and `WithReadQuorum` give the reasons: the registry can be rebuilt, single activation ([Chapter 13, §13.6](chap-13.md#136-one-activation-per-identity)) is decided by the partition's primary owner rather than by overlapping quorums ([§20.6](#206-claims-fences-and-scans)), read repair heals replicas that missed a write, and quorums of 1 keep registry writes succeeding while a node is down. The comment on `WithReplicaCount` says the default of 2 keeps a backup of every partition, so the registry survives the loss of one node and registry-derived crash recovery stays complete; with 1, a crashed node's partitions are lost with it.
 
 ### From `ClusterConfig` to the engine
 
-`setupCluster` (`actor/actor_system.go`) builds the engine with `cluster.New`, the system's logger (`WithLogger`) and one engine option per setting: `WithShardCount`, `WithPartitioner`, `WithMinimumMembersQuorum`, `WithMembersWriteQuorum`, `WithMembersReadQuorum`, `WithReplicasCount`, `WithTLS`, `WithWriteTimeout`, `WithReadTimeout`, `WithShutdownTimeout`, `WithDataTableSize`, `WithBootstrapTimeout`, `WithRoutingTableInterval`, `WithBalancerInterval`, `WithConvergenceTimeout` and `WithNetworkProfile` (`internal/cluster/config.go`). Every engine option except `WithNetworkProfile` and `WithTLS` ignores a zero or nil value and keeps the engine default from `defaultConfig`. The engine defaults equal the `ClusterConfig` defaults except the replica count, which is 1 in the engine; the actor system always passes its own value. A `ClusterConfig` timeout of zero therefore reaches the engine as its one-second, three-minute or ten-second default. The TLS settings come from the remote configuration, or from the deprecated `WithTLS` option when the remote configuration has none (`actorSystem.validate`; [Chapter 18](chap-18.md)).
+`setupCluster` (`actor/actor_system.go`) builds the engine with `cluster.New`, the system's logger (`WithLogger`) and one engine option per setting: `WithShardCount`, `WithPartitioner`, `WithMinimumMembersQuorum`, `WithMembersWriteQuorum`, `WithMembersReadQuorum`, `WithReplicasCount`, `WithTLS`, `WithWriteTimeout`, `WithReadTimeout`, `WithShutdownTimeout`, `WithDataTableSize`, `WithBootstrapTimeout`, `WithRoutingTableInterval`, `WithBalancerInterval`, `WithConvergenceTimeout` and `WithNetworkProfile` (`internal/cluster/config.go`). Every engine option except `WithNetworkProfile` and `WithTLS` ignores a zero or nil value and keeps the engine default from `defaultConfig`. The engine defaults equal the `ClusterConfig` defaults except the replica count, which is 1 in the engine; the actor system always passes its own value. A `ClusterConfig` timeout of zero therefore reaches the engine as its one-second, three-minute or ten-second default. The TLS settings come from the remote configuration, or from the deprecated `WithTLS` option when the remote configuration has none (`actorSystem.validate`; [Chapter 18, §18.1](chap-18.md#181-tlsinfo-and-where-it-is-set)).
 
 `cluster.buildConfig` (`internal/cluster/cluster.go`) turns the engine's fields into Olric's configuration:
 
@@ -145,7 +157,7 @@ The comment on `InitialSyncEmptyPartitionTimeout` explains it: with more than on
 
 ## 20.3 Start and stop
 
-`cluster.Start` returns at once on a running engine. Otherwise it runs `bootstrap` under `retryBootstrap`: at most three attempts (`defaultBootstrapMaxAttempts`), sleeping one second times the attempt number between them (`defaultBootstrapRetryBackoff`), stopping early when the context ends, and wrapping the last error with the attempt count. The comment on the constants gives the reason: a node joining a cluster that holds data can exceed the bootstrap timeout while partitions redistribute, and crashing the process would turn that transient into a restart loop. Every failure, permanent ones included, uses up an attempt.
+`cluster.Start` returns at once on a running engine. Otherwise it runs `bootstrap` under `retryBootstrap`: at most three attempts (`defaultBootstrapMaxAttempts`), sleeping one second times the attempt number between them (`defaultBootstrapRetryBackoff`). Exhausting the attempts returns the last error wrapped with the attempt count; a context that ends first stops the retries and returns the last error joined with the context error. The comment on the constants gives the reason: a node joining a cluster that holds data can exceed the bootstrap timeout while partitions redistribute, and crashing the process would turn that transient into a restart loop. Each attempt already contains Olric's own join retries, so the three attempts multiply the worst-case startup time. Every failure, permanent ones included, uses up an attempt.
 
 One attempt, in order (`cluster.bootstrap`):
 
@@ -155,6 +167,26 @@ One attempt, in order (`cluster.bootstrap`):
 4. Wait up to the bootstrap timeout for the initial replica sync. A failure shuts the server down, so a failed attempt leaves no port bound and no member joined (`waitForInitialSync`).
 5. Create the embedded client and the data map `goakt.dmap` (`dMapName`, `cluster.createDMap`).
 6. Subscribe to Olric's cluster events channel through the embedded client's pub/sub, addressed to the local node (`cluster.createSubscription`).
+
+```mermaid
+flowchart TD
+    S["Start"] --> R{"running?"}
+    R -->|"yes"| Done["return nil"]
+    R -->|"no"| A["bootstrap attempt n of 3"]
+    A --> B1["1 Olric config, hasher"]
+    B1 --> B2["2 memberlist and discovery"]
+    B2 --> B3["3 olric.New and Start, wait for Started"]
+    B3 --> B4["4 wait for the initial sync, up to the bootstrap timeout"]
+    B4 --> B5["5 embedded client and goakt.dmap"]
+    B5 --> B6["6 subscribe to cluster.events"]
+    B6 --> OK["running flag, coordinator baseline, consume goroutine"]
+    B3 -->|"error"| F["server shut down, attempt failed"]
+    B4 -->|"error"| F
+    B5 -->|"error"| F
+    B6 -->|"error"| F
+    F -->|"attempts left"| W["sleep n seconds"] --> A
+    F -->|"none left or context done"| Err["return the error"]
+```
 
 A failure in steps 5 or 6 shuts the server down too. After a successful attempt, `Start` sets the running flag, records the current coordinator as the baseline for leader changes, without publishing an event (`lastCoordinatorAddr`, [§20.8](#208-peers-members-and-the-leader)), and starts the consume goroutine ([§20.9](#209-cluster-events)). The baseline is written before that goroutine exists and afterwards only under the events lock.
 
@@ -192,7 +224,7 @@ Keying actors by qualified name means two children called `kid` under different 
 
 ### Records and their encoding
 
-An actor record is the protobuf message `Actor` (`protos/internal/actor.proto`): the address, the actor's type name, the singleton specification, the relocatable flag, the passivation strategy, the encoded dependencies, the stash flag, the role, the supervisor, the reentrancy configuration, the init timeout, the **incarnation ID**, and the reliable-delivery endpoint or companion specification. A grain record is the message `Grain` (`protos/internal/grain.proto`): the identity, the host and remoting port of the owning node, the dependencies, the activation timeout and retries, the mailbox capacity, the relocation flags, the reentrancy configuration and the role. `PID.toSerialize` in `actor/pid.go` and `grainPID.toWireGrain` in `actor/grain_pid.go` build them.
+An actor record is the protobuf message `Actor` (`protos/internal/actor.proto`): the address, the actor's type name, the singleton specification ([Chapter 21, §21.4](chap-21.md#214-cluster-singletons)), the relocatable flag ([Chapter 21, §21.3](chap-21.md#213-what-relocates)), the passivation strategy ([Chapter 10](chap-10.md)), the encoded dependencies ([Chapter 12, §12.2](chap-12.md#122-dependencies)), the stash flag ([Chapter 8, §8.4](chap-08.md#84-the-stash)), the role, the supervisor ([Chapter 9](chap-09.md)), the reentrancy configuration ([Chapter 8, §8.5](chap-08.md#85-reentrancy-requests-that-do-not-block)), the init timeout (only when it was an explicit override), the **incarnation ID**, the reliable-delivery endpoint or companion specification ([Chapter 23](chap-23.md)) and the name of the named dispatcher, when the actor is not on the default one ([Chapter 7, §7.1](chap-07.md#71-the-pieces)). A grain record is the message `Grain` (`protos/internal/grain.proto`): the identity, the host and remoting port of the owning node, the dependencies, the activation timeout and retries, the mailbox capacity, the relocation flags, the reentrancy configuration, the role and the dispatcher name. `PID.toSerialize` in `actor/pid.go` and `grainPID.toWireGrain` in `actor/grain_pid.go` build them.
 
 `encode`, `decode`, `encodeGrain` and `decodeGrain` in `internal/cluster/codec.go` are plain `proto.Marshal` and `proto.Unmarshal`. The encoders drop the marshal error and always return `nil`. A value that does not decode fails the read, the scan or the claim that met it.
 
@@ -202,9 +234,9 @@ An actor record is the protobuf message `Actor` (`protos/internal/actor.proto`):
 
 The engine calls the embedded client's map with the composed key. In Olric:
 
-- **A write** is routed to the partition's primary owner (`DMap.put` in `github.com/tochemey/olric/internal/dmap/put.go`). With synchronous replication the owner sends the entry to each backup owner that is still a member, then stores it locally, and succeeds when the acknowledgements, its own store included, reach the write quorum; otherwise the write fails with Olric's `ErrWriteQuorum`. A backup that is no longer a member is skipped and counts as not acknowledged; an error from a live backup, an error reply as well as a failed call, fails the write with that error (`DMap.syncPutOnCluster` in the same file).
+- **A write** is routed to the partition's primary owner (`DMap.put` in `github.com/tochemey/olric/internal/dmap/put.go`). With synchronous replication the owner sends the entry to each backup owner that is still a member, then stores it locally, and succeeds when the acknowledgements, its own store included, reach the write quorum; otherwise the write fails with Olric's `ErrWriteQuorum`. A backup that is no longer a member is skipped and counts as not acknowledged. A call to a live backup that returns an error fails the write with that error; an error carried only by the command result after the call went through is logged and counts as not acknowledged (`DMap.syncPutOnCluster` in the same file).
 - **A conditional write** (`NX`) is checked against the owner's copy of the key under a lock held for the whole write, the key's lock or, with one replica, the partition fragment's lock (`DMap.checkPutConditions` and `DMap.putOnCluster` in the same file), so two concurrent claims of one key are decided at one place.
-- **A read** on the owner gathers its own copy, the copies of previous primary owners still in the cluster and those of the live backup owners. A key found nowhere is key-not-found; fewer copies found than the read quorum fails with `ErrReadQuorum`. Otherwise the read returns the copy with the newest timestamp and, with read repair, writes it to every gathered copy that is older and to the owner's own copy when it lacks the key (`DMap.getOnCluster` and `DMap.readRepair` in `github.com/tochemey/olric/internal/dmap/get.go`). The comment there states the rule: last write wins.
+- **A read** on the owner gathers its own copy, the copies of previous primary owners still in the cluster and those of the live backup owners. Fewer answers than the read quorum (the owner's own answer counts even when it lacks the key) fails with `ErrReadQuorum`; a key found in no copy is key-not-found; fewer copies found than the read quorum fails with `ErrReadQuorum`. Otherwise the read returns the copy with the newest timestamp (the owner's copy wins a tie) and, with read repair, writes it to every gathered copy whose timestamp differs, the owner's own copy included when it lacks the key (`DMap.getOnCluster`, `DMap.sortVersions` and `DMap.readRepair` in `github.com/tochemey/olric/internal/dmap/get.go`). The comment there states the rule: last write wins.
 
 ### Timeouts
 
@@ -226,16 +258,16 @@ The engine calls the embedded client's map with the composed key. In Olric:
 | Error | Where it comes from | Meaning |
 |---|---|---|
 | `ErrEngineNotRunning` | the engine | the engine is not started |
-| `ErrActorNotFound`, `ErrGrainNotFound` | `GetActor`, `GetGrain` | no record (Olric's key-not-found) |
+| `ErrActorNotFound`, `ErrGrainNotFound` | `GetActor`, `GetGrain`; `ErrActorNotFound` also from `GetPartition` | no record (Olric's key-not-found) |
 | `ErrActorAlreadyExists`, `ErrGrainAlreadyExists`, `ErrScheduleFireClaimed` | the claims of [§20.6](#206-claims-fences-and-scans) | another incarnation, node or caller holds the key |
 | Olric's `ErrWriteQuorum`, `ErrReadQuorum` | Olric | too few replicas acknowledged a write, too few copies were found for a read |
-| Olric's `ErrClusterQuorum` | Olric, when the data map is created at bootstrap | too few members visible ([§20.11](#2011-network-partitions)). Another node that sees too few members also refuses the requests this node sends it (`Olric.preconditionFunc` in `github.com/tochemey/olric/olric.go`), but that refusal arrives as a plain error with Olric's message, not as this sentinel |
+| Olric's `ErrClusterQuorum` | Olric, when the data map is created at bootstrap | too few members visible ([§20.11](#2011-network-partitions)). Another node that sees too few members, or has not received a routing table, also refuses the requests this node sends it (`Olric.preconditionFunc` and `Olric.isOperable` in `github.com/tochemey/olric/olric.go`), but that refusal arrives as a plain error with Olric's message, not as this sentinel |
 | Olric's `ErrLockNotAcquired` | `lockRecord` | the record's lock was still held when the wait ended; the caller retries |
 | `ErrClusterRegistryTimeout` (`errors/errors.go`) | `registryReadError` | a read ran out of the engine's read timeout while the caller's context was still alive |
 
 `registryReadError` wraps the deadline error with `ErrClusterRegistryTimeout`, so `errors.Is(err, context.DeadlineExceeded)` still matches and the caller can tell the registry's internal timeout from its own deadline; a timeout after the caller's context ended, and any other error, are returned unchanged. The sentinel's comment says the lookup is inconclusive and can be retried. Only reads that go through `getRecord` are marked; scans are not.
 
-**Quorum errors exist twice.** `ErrWriteQuorum`, `ErrReadQuorum` and `ErrClusterQuorum` in `errors/errors.go` are GoAkt's sentinels; Olric has its own values with the same names. `IsQuorumError` in `internal/quorum/quorum.go` recognises either, and `NormalizeQuorumError` maps either to GoAkt's sentinel and returns any other error unchanged; `IsQuorumError` and `NormalizeQuorumError` in `internal/cluster/errors.go` wrap them. The actor package uses them in three places: the singleton spawn's retry loop returns the normalised error and retries on a quorum error (`actorSystem.retrySpawnSingleton` and `shouldRetrySpawnSingleton` in `actor/spawn.go`), and `spawnErrorToProto` sends a quorum error to a remote caller as `CODE_UNAVAILABLE` (`actor/remote_server.go`). Every other path, a plain `Spawn` among them, returns Olric's value, which `errors.Is` does not match against GoAkt's sentinel.
+**Quorum errors exist twice.** `ErrWriteQuorum`, `ErrReadQuorum` and `ErrClusterQuorum` in `errors/errors.go` are GoAkt's sentinels; Olric has its own values with the same names. `IsQuorumError` in `internal/quorum/quorum.go` recognises either, and `NormalizeQuorumError` maps either to GoAkt's sentinel and returns any other error unchanged; `IsQuorumError` and `NormalizeQuorumError` in `internal/cluster/errors.go` wrap them. The actor package uses them in three places: the singleton spawn's retry loop ([Chapter 21, §21.4](chap-21.md#214-cluster-singletons)) returns the normalised error and retries on a quorum error (`actorSystem.retrySpawnSingleton` and `shouldRetrySpawnSingleton` in `actor/spawn.go`), and `spawnErrorToProto` sends a quorum error to a remote caller as `CODE_UNAVAILABLE` (`actor/remote_server.go`; [Chapter 17](chap-17.md)). Every other path, a plain `Spawn` ([Chapter 4, §4.2](chap-04.md#42-the-local-spawn-path-step-by-step)) among them, returns Olric's value, which `errors.Is` does not match against GoAkt's sentinel.
 
 ### Local locking
 
@@ -257,7 +289,7 @@ A **single-claim record** is a key that at most one owner holds at a time. The r
 
 The allowed incarnation for `PutActor` is the actor's own: that is how a restart or a registry repair republishes an actor the node already owns. `ReplaceActor` runs steps 2 to 5 with one more allowed incarnation, the stale one the caller names, which a node that left the cluster left behind. It writes over the stale record rather than deleting it first; the comment gives the reason: a delete is refused while a copy lives on a node the routing table has not dropped yet, whereas a write goes through and wins over that copy if it is ever merged back.
 
-`RemoveActor` always takes the name's lock. With `AnyIncarnation` it deletes whatever is there; the constant's comment reserves it for names that identify one activation by construction, such as reliable-delivery controller companions. Otherwise it reads the record: absent returns `nil, nil`; another incarnation returns that record and deletes nothing; its own incarnation is deleted. **The cleanup of one activation therefore never deletes the record of a newer one.**
+`RemoveActor` always takes the name's lock. With `AnyIncarnation` it deletes whatever is there; the constant's comment reserves it for names that identify one activation by construction, such as reliable-delivery controller companions ([Chapter 23, §23.13](chap-23.md#2313-companions-identity-spawn-and-resolution)). Otherwise it reads the record: absent returns `nil, nil`; another incarnation returns that record and deletes nothing; its own incarnation is deleted. **The cleanup of one activation therefore never deletes the record of a newer one.**
 
 How the actor system uses this primitive (the spawn precondition, `departedClaim`, the takeover of a departed node's claim, and the death watch's fenced removal) is in [Chapter 4, §4.2](chap-04.md#42-the-local-spawn-path-step-by-step) and [Chapter 9, §9.8](chap-09.md#98-death-watch).
 
@@ -308,17 +340,15 @@ flowchart TD
 
 `GetPartition(ctx, name)` reads the actor record through `getEntry`, the read `getRecord` also runs, and returns the partition Olric reports for it, so the value is always the partition that holds the record. A missing record returns `ErrActorNotFound`; any other read failure is returned the way `getEntry` returns it, an engine timeout under a live caller context as `ErrClusterRegistryTimeout` (`registryReadError`). `ActorSystem.Partition` exposes it in cluster mode and turns the missing record into the public `ErrActorNotFound`; it returns `ErrActorSystemNotStarted` on a stopped actor system and `ErrClusterDisabled` outside cluster mode, never a partition that a failure could be mistaken for (`actorSystem.Partition` in `actor/actor_system.go`).
 
-`PartitionOwner(ctx, name)` returns the member that owns the partition of the actor key, whether or not a record exists. It asks the unified map, always an `olric.EmbeddedDMap`, for the owner of `composeKey(namespaceActors, name)` (`EmbeddedDMap.Owner` in `github.com/tochemey/olric/embedded_client.go`), which hashes the key with the member's own hasher and reads the member's own partition table, so the answer comes from the same key and hasher the registry writes use and costs no network call. The member becomes a `Peer` through `toPeer`. The answer is a snapshot: during a rebalance the table can still name the previous owner. Before the node has received a routing table, Olric returns `ErrNotBootstrapped`; a map other than the embedded one is an error. `SpawnOn` with `HashBased` placement uses it ([Chapter 21, §21.1](chap-21.md#211-placement-with-spawnon)).
+`PartitionOwner(ctx, name)` returns the member that owns the partition of the actor key, whether or not a record exists. It asks the unified map, always an `olric.EmbeddedDMap`, for the owner of `composeKey(namespaceActors, name)` (`EmbeddedDMap.Owner` in `github.com/tochemey/olric/embedded_client.go`), which hashes the key with the member's own hasher (`partitions.HKey`) and reads the member's own partition table, so the answer comes from the same key and hasher the registry writes use and costs no network call. The member becomes a `Peer` through `toPeer`. The answer is a snapshot: during a rebalance the table can still name the previous owner. Before the node has received a routing table, Olric returns `ErrNotBootstrapped`; a map other than the embedded one is an error. `SpawnOn` with `HashBased` placement uses it ([Chapter 21, §21.1](chap-21.md#211-placement-with-spawnon)).
 
 ## 20.7 Partition hashing
 
 The `Hasher` interface in `hash/hasher.go` has one method, `HashCode([]byte) uint64`. `DefaultHasher` returns an xxh3 implementation. `hasherWrapper` in `internal/cluster/hasher.go` adapts a `Hasher` to Olric's `Sum64`, and `bootstrap` installs it as Olric's hasher.
 
-Olric hashes the map name concatenated with the key, `goakt.dmap` followed by the composed key, and takes the result modulo the partition count (`HKey` in `github.com/tochemey/olric/internal/cluster/partitions/hkey.go`; `Partitions.PartitionIDByHKey` in `github.com/tochemey/olric/internal/cluster/partitions/partitions.go`). Every record of every namespace is placed by the same function.
+Olric hashes the map name concatenated with the key, `goakt.dmap` followed by the composed key, with the instance's configured hasher and takes the result modulo the partition count (`HKey` in `github.com/tochemey/olric/internal/cluster/partitions/hkey.go`; `Partitions.PartitionIDByHKey` in `github.com/tochemey/olric/internal/cluster/partitions/partitions.go`). Every record of every namespace is placed by the same function.
 
-**Which hasher a node uses.** `NewActorSystem` starts with `hash.DefaultHasher()`. The deprecated option `WithPartitionHasher` (`actor/option.go`) replaces it; `ClusterConfig.WithPartitionHasher` replaces both, because `actorSystem.validate` copies it over the system's hasher when set. `setupCluster` passes the result to the engine with `WithPartitioner`. The comment on `ClusterConfig.WithPartitionHasher` states the contract: every node must use the same hasher, deterministic and stable across restarts, or nodes disagree on partition ownership and registry lookups fail. Nothing checks it.
-
-Olric stores the hash function in a package variable set once per process (`SetHashFunc` in `github.com/tochemey/olric/internal/cluster/partitions/hkey.go`, guarded by `sync.Once`), which `New` in `github.com/tochemey/olric/olric.go` calls. In one process, the first Olric instance created, by the first engine to bootstrap, decides the hasher for every engine after it.
+**Which hasher a node uses.** `NewActorSystem` starts with `hash.DefaultHasher()`. The deprecated option `WithPartitionHasher` (`actor/option.go`) replaces it; `ClusterConfig.WithPartitionHasher` replaces both, because `actorSystem.validate` copies it over the system's hasher when set. `setupCluster` passes the result to the engine with `WithPartitioner`. The comment on `ClusterConfig.WithPartitionHasher` states the contract: every node must use the same hasher, deterministic and stable across restarts, or nodes disagree on partition ownership and registry lookups fail. Nothing checks it. Each Olric instance hashes with its own hasher (`Olric.hashFunc` in `github.com/tochemey/olric/olric.go`, set from the configuration `Config.Hasher`), so engines of different actor systems in one process do not share a hasher.
 
 ## 20.8 Peers, members and the leader
 
@@ -378,15 +408,15 @@ The engine does not announce a join or departure when it hears of it. **It holds
 
 | Converged member set | Pending | Announced |
 |---|---|---|
-| lists the node | a reflected departure and a join | `NodeLeft`, then `NodeJoined`: it left and came back |
+| lists the node | a reflected departure and a pending join | `NodeLeft`, then `NodeJoined`: it left and came back |
 | lists the node | a departure the coordinator placed before this table | nothing; if the node is a member now, the departure is a stale copy and is dropped, otherwise it stays pending |
 | lists the node | a reflected join | `NodeJoined` |
-| does not list the node | a reflected join and a departure | `NodeJoined`, then `NodeLeft`: it joined and left |
+| does not list the node | a reflected join and a pending departure | `NodeJoined`, then `NodeLeft`: it joined and left |
 | does not list the node | a reflected departure | `NodeLeft` |
 
 The second row has a long comment. The coordinator completes a rebalance epoch on live members only but announces the member set the epoch started with, so an epoch that began before a crash and completed after it carries a newer generation and still lists the dead node. Only the current membership tells a restarted node from one that is gone. A failed membership read keeps the departure pending: a drop cannot be undone, and the wait is bounded.
 
-**The bounded wait.** When the timer of a pending event fires before any convergence reflects it, the engine logs a warning and announces every pending event of that node in the order it observed them (`emitOverdueNodeJoined`, `emitOverdueNodeLeft`, `releaseNodeLocked`). The comment on `pendingEventEmitTimeout` explains why there is a bound at all: waiting orders the event after Olric's partition redistribution, but a rebalance can fail to complete, which would otherwise suppress the event forever and with it a crashed node's relocation. The comment on `DefaultClusterConvergenceTimeout` in `actor/defaults.go` explains why ten seconds: convergence after the oldest member leaves takes two to four seconds, and a shorter bound would publish the event while some node still routes to the departed one.
+**The bounded wait.** When the timer of a pending event fires before any convergence reflects it, the engine logs a warning and announces every pending event of that node in the order it observed them (`emitOverdueNodeJoined`, `emitOverdueNodeLeft`, `releaseNodeLocked`). The comment on `pendingEventEmitTimeout` explains why there is a bound at all: waiting orders the event after Olric's partition redistribution, but a rebalance can fail to complete, which would otherwise suppress the event forever and with it a crashed node's relocation ([Chapter 21, §21.6](chap-21.md#216-what-every-node-does-on-nodeleft)). The comment on `DefaultClusterConvergenceTimeout` in `actor/defaults.go` explains why ten seconds: convergence after the oldest member leaves takes two to four seconds, and a shorter bound would publish the event while some node still routes to the departed one.
 
 **Once per change.** `emitNodeJoinedLocked` and `emitNodeLeftLocked` keep two filters of the last announced change per node, so a node is announced as joined once until it is announced as departed, and the reverse. A member that leaves, restarts at the same address and leaves again is announced each time.
 
@@ -418,7 +448,7 @@ Inside the startup chain ([Chapter 3, §3.3](chap-03.md#33-start)), `setupCluste
 
 1. Start the engine ([§20.3](#203-start-and-stop)).
 2. Set up the grain activation barrier ([Chapter 13](chap-13.md)).
-3. Fill the cache from peers address to remoting port from the current membership (`cachePeerRemotingPorts`), so a member present at startup can be resolved when it later crashes.
+3. Fill the cache from peers address to remoting port ([Chapter 15](chap-15.md)) from the current membership (`cachePeerRemotingPorts`), so a member present at startup can be resolved when it later crashes.
 4. Take the engine's events channel and start `clusterEventsLoop` on its own goroutine.
 5. Reconcile this node's own stale records left by a previous incarnation at the same address (`cleanupStaleLocalActors`); a failure is a warning. [Chapter 21](chap-21.md) describes it.
 
@@ -432,7 +462,7 @@ Inside the startup chain ([Chapter 3, §3.3](chap-03.md#33-start)), `setupCluste
 
 `handleNodeJoinedEvent` refreshes the remoting-port cache, closes the handoff window of a node that rejoined at the same address (`markEndpointRecovered`, [Chapter 21](chap-21.md)), tries to open the grain activation barrier, and triggers datacenter reconciliation ([Chapter 22](chap-22.md)). **It does not rewrite the registry.** Its comment gives the reason and the trade-off: Olric migrates partition data to the joining node, re-putting every local record on each join would cost a write per actor in the cluster, and with one replica a migration disrupted mid-flight can lose entries that stay lost until the next departure's repair.
 
-`handleNodeLeftEvent` closes the remoting peer of the departed node, prunes the remote watches pointing at it ([Chapter 9, §9.9](chap-09.md#99-remote-watch)), repairs the registry if needed (below), triggers datacenter reconciliation, and, with relocation enabled, opens the handoff window and lets the leader relocate the departed node's actors and grains while every other node deletes its copy of that node's peer state. [Chapter 21](chap-21.md) covers everything after the repair.
+`handleNodeLeftEvent` closes the remoting peer of the departed node ([Chapter 15](chap-15.md)), prunes the remote watches pointing at it ([Chapter 9, §9.9](chap-09.md#99-remote-watch)), repairs the registry if needed (below), triggers datacenter reconciliation, forgets the cached remoting port of the node (a crash recovery that runs on its own goroutine takes over that step), and, with relocation enabled, opens the handoff window and lets the leader relocate the departed node's actors and grains while every other node deletes its copy of that node's peer state. [Chapter 21](chap-21.md) covers everything after the repair.
 
 The handlers run on the loop's goroutine. A slow handler, such as a repair that writes every local actor, delays the events behind it, and once 256 are waiting the engine drops new ones ([§20.9](#209-cluster-events)).
 
@@ -449,8 +479,10 @@ GoAkt has no split-brain resolver: no code picks a side of a partition or stops 
 - **Member-count quorum.** `minimumPeersQuorum` becomes Olric's `MemberCountQuorum`, the number of members a node must see in its own memberlist view (`RoutingTable.CheckMemberCountQuorum` in `github.com/tochemey/olric/internal/cluster/routingtable/routingtable.go`). Olric checks it in four places:
   1. At startup, the routing table waits for it before it starts, so the engine's `Start` does not return before the node sees that many members ([§20.3](#203-start-and-stop)).
   2. When the data map is created at bootstrap (`Service.NewDMap` in `github.com/tochemey/olric/internal/dmap/dmap.go`).
-  3. Before every command a node's server receives over the network (`Olric.preconditionFunc` in `github.com/tochemey/olric/olric.go`), except three internal commands that touch no data: the routing-table push, the partition key-count probe and the internal publish of cluster events (`preconditionExempt` in `github.com/tochemey/olric/internal/server/handler.go`).
+  3. Before every command a node's server receives over the network, together with a check that the node has received a routing table (`Olric.preconditionFunc` and `Olric.isOperable` in `github.com/tochemey/olric/olric.go`), except three internal commands that touch no data: the routing-table push, the partition key-count probe and the internal publish of cluster events (`preconditionExempt` in `github.com/tochemey/olric/internal/server/handler.go`).
   4. On the coordinator, before it recomputes the routing table (`RoutingTable.updateRoutingWithReason` in the same routing-table file). A side whose coordinator sees too few members therefore gets no new routing table and no convergence, and its `NodeJoined` and `NodeLeft` events come from the bounded wait ([§20.9](#209-cluster-events)).
+
+  With a quorum above 1, Olric also runs a rejoin loop that, every `RejoinInterval` (5 seconds by default) and only while the member count is below the quorum, re-resolves the discovery backend and dials the peers (`RoutingTable.rejoinLoop` and `RoutingTable.tryRejoin` in `github.com/tochemey/olric/internal/cluster/routingtable/discovery.go`), so a side that fell below the quorum keeps trying to reach the other.
 
   The map operations GoAkt calls on the embedded client (get, put, delete, lock, increment) go straight to the local map service, and nothing checks the quorum on the calling node. So on a node that sees too few members, a read or write of a key whose primary partition it owns proceeds. A request it sends to another node, the replication of its own write to a backup included, is refused only if that node sees too few members. The refusal arrives as a plain error carrying Olric's message, not as Olric's `ErrClusterQuorum`, so `IsQuorumError` does not recognise it.
 - **Replica quorums.** A write that cannot reach its write quorum, or a read its read quorum, fails with Olric's quorum error. With the defaults (all 1), both sides keep reading and writing their own view of the registry once each side routes on a table computed for its own members; until then an operation on a key whose owner is on the other side fails, since that owner cannot be reached.
@@ -486,7 +518,7 @@ Least-load placement asks every candidate for its load (`actorSystem.leastLoaded
 
 ## 20.14 Olric's log output
 
-Olric and memberlist write plain log lines to an `io.Writer`. `logWriter` in `internal/cluster/logwriter.go` is that writer: it trims the line, finds the earliest of the prefixes `[INFO]`, `[DEBUG]`, `[WARN]`, `[ERROR]` and `[ERR]`, strips it and one following space, and forwards the rest to the GoAkt logger. `[INFO]` and `[DEBUG]` go to `Debug`, so Olric's steady-state chatter appears only at debug level; `[WARN]` to `Warn`; `[ERROR]` and `[ERR]` to `Error`. `[ERR]` does not occur inside `[ERROR]`, so an `[ERROR]` line is matched by `[ERROR]` alone and its whole prefix is stripped. A line without a known prefix is dropped. `Write` always reports the full length and no error, so logging never breaks Olric. Separately, `buildConfig` sets Olric's level from the GoAkt logger's and enables the Redis client's logs only at debug level.
+Olric and memberlist write plain log lines to an `io.Writer`, which the engine routes to the system's logger ([Chapter 12, §12.5](chap-12.md#125-logging)). `logWriter` in `internal/cluster/logwriter.go` is that writer: it trims the line, finds the earliest of the prefixes `[INFO]`, `[DEBUG]`, `[WARN]`, `[ERROR]` and `[ERR]`, strips it and one following space, and forwards the rest to the GoAkt logger. `[INFO]` and `[DEBUG]` go to `Debug`, so Olric's steady-state chatter appears only at debug level; `[WARN]` to `Warn`; `[ERROR]` and `[ERR]` to `Error`. `[ERR]` does not occur inside `[ERROR]`, so an `[ERROR]` line is matched by `[ERROR]` alone and its whole prefix is stripped. A line without a known prefix is dropped. `Write` always reports the full length and no error, so logging never breaks Olric. Separately, `buildConfig` sets Olric's level from the GoAkt logger's and enables the Redis client's logs only at debug level.
 
 ## Guarantees
 
@@ -512,7 +544,7 @@ Olric and memberlist write plain log lines to an `io.Writer`. `logWriter` in `in
 | `CountActorsByHost` counts per `host:port` without fetching other namespaces or the counter, and skips a malformed address; `ActorsByHost` and `GrainsByHost` return only the named node's records | `TestCountActorsByHostTalliesPerHost`, `TestCountActorsByHostSkipsMalformedAddress`, `TestActorsByHostReturnsOnlyMatchingHost` and `TestGrainsByHostReturnsOnlyMatchingHost` in `internal/cluster/cluster_test.go` |
 | A read that runs out of the engine's timeout under a live caller context carries `ErrClusterRegistryTimeout` and still matches `context.DeadlineExceeded`; after the caller's deadline, and for other errors, the error is unchanged | `TestGetActorRegistryReadTimeout` in `internal/cluster/cluster_test.go` |
 | Olric's and GoAkt's quorum errors are both recognised and normalised to GoAkt's sentinels; any other error is returned as it is | `TestIsQuorumError` and `TestNormalizeQuorumError` in `internal/cluster/errors_test.go` |
-| `GetPartition` returns the record's partition, and 0 once the record is removed; every node reports the same partition for an actor | `TestSingleNode` in `internal/cluster/cluster_test.go`; `TestActorSystem` in `actor/actor_system_test.go` |
+| `GetPartition` returns the record's partition and `ErrActorNotFound` once the record is removed; every node reports the same partition for an actor, a child included; `ActorSystem.Partition` reports a stopped system, a system without a cluster, a missing record and a registry read error as errors, never as partition 0 | `TestSingleNode` in `internal/cluster/cluster_test.go`; `TestActorSystem` in `actor/actor_system_test.go` |
 | A join is announced only on a convergence of a later generation that lists the node; a departure only on one that does not; a convergence of the same generation does not count | `TestTrackNodeJoinEvent`, `TestTrackNodeLeftEvent` and `TestTrackMembershipChangeEvent` in `internal/cluster/cluster_test.go` |
 | The coordinator's announcement replaces the placement of a local observation, never the reverse; this node's own join and an update are ignored | `TestTrackNodeJoinEvent`, `TestTrackNodeLeftEvent` and `TestTrackMembershipChangeEvent` in `internal/cluster/cluster_test.go` |
 | A completion without a generation and a stale or duplicate one are ignored; a lower generation from a new coordinator is accepted | `TestProcessRebalanceCompleteKeepsTheNewestConvergence` in `internal/cluster/cluster_test.go` |
@@ -523,17 +555,18 @@ Olric and memberlist write plain log lines to an `io.Writer`. `logWriter` in `in
 | An unreflected event is announced when the bounded wait ends, with the node's other pending event in observation order; an announced event's timer is stopped | `TestPendingEventIsAnnouncedAfterTheBoundedWait`, `TestOverdueReleasesNodeEventsInObservationOrder` and `TestPendingEventTimerIsCancelledOnAnnounce` in `internal/cluster/cluster_test.go` |
 | Stopping drops every pending event and its timer; a change tracked after the stop arms nothing | `TestCancelPendingEventsLocked` and `TestTrackingIsIgnoredAfterStop` in `internal/cluster/cluster_test.go` |
 | In a three-node cluster the first node receives two events, the first a `NodeJoined` naming the second node; stopping the second node gives the first one `NodeLeft` naming it | `TestMultipleNodes` in `internal/cluster/cluster_test.go` |
+| A full events channel drops the new event, logs a warning and never blocks | `TestSendEventLockedDropsEventWhenChannelFull` in `internal/cluster/cluster_test.go` |
 | `LeaderChanged` is sent when the coordinator changes, not when it is unchanged, and not when the membership read fails | `TestDetectLeaderChange` in `internal/cluster/cluster_test.go` |
 | The first node started is the leader; a joiner announces no leader change; when the leader stops, the survivor announces exactly one `LeaderChanged` with its own address and becomes the leader; another member's departure announces none | `TestLeaderChangedEvent` in `internal/cluster/cluster_test.go`; `TestActorSystem` in `actor/actor_system_test.go` |
 | In a three-node cluster only the first node is the leader, and `Leader` returns it on every node; both need a started, clustered system | `TestIsLeader` and `TestLeader` in `actor/actor_system_test.go` |
 | `Peers` excludes the local node and reads the ports from member metadata; `IsMember` matches a member by name or by advertised peers address | `TestPeersFiltersSelfAndParsesMeta` and `TestIsMember` in `internal/cluster/cluster_test.go` |
-| A joining node's `NodeJoined` and a stopped node's `NodeLeft` are published on the other node's event stream | `TestActorSystem` in `actor/actor_system_test.go` |
+| A joining node's `NodeJoined` and a stopped node's `NodeLeft` are published on the other node's event stream ([Chapter 11, §11.3](chap-11.md#113-the-event-stream)) | `TestActorSystem` in `actor/actor_system_test.go` |
 | Joins and departures are counted, leader changes are not | `TestHandleClusterEventCountsMembershipChurn` in `actor/actor_system_test.go` |
 | The registry repair is skipped with replicas, runs with one replica, and runs when departures within the window reach the replica count | `TestResyncAfterClusterEventSkipsWithReplicas`, `TestResyncAfterClusterEventRunsWithoutReplicas` and `TestResyncAfterClusterEventRunsOnCorrelatedDepartures` in `actor/actor_system_test.go` |
 | The repair skips an actor whose name another incarnation owns and repairs the others | `TestResyncActorsSkipsNameOwnedElsewhere` in `actor/actor_system_test.go` |
 | `ClusterConfig` defaults to two replicas, quorums of 1, a ten-second convergence timeout and the LAN profile; it rejects a zero partition count, a negative barrier timeout, a non-positive convergence timeout and an unknown profile; roles are deduplicated | `TestClusterConfig` in `actor/cluster_config_test.go` |
 | Engine options set their fields and ignore zero or nil values | `TestConfigOptions` and `TestConfigOptionsIgnoreZeroOrNil` in `internal/cluster/config_test.go` |
-| Clustering without remoting fails `Start`; a replica count of 1 logs a warning | `TestActorSystemStartClusterErrors` and `TestSetupClusterWarnsOnSingleReplica` in `actor/actor_system_test.go` |
+| Clustering without remoting ([Chapter 15](chap-15.md)) fails `Start`; a replica count of 1 logs a warning | `TestActorSystemStartClusterErrors` and `TestSetupClusterWarnsOnSingleReplica` in `actor/actor_system_test.go` |
 | The cluster configuration's partition hasher wins over the deprecated option, which wins over the default | `TestActorSystem` in `actor/actor_system_test.go` |
 | The hasher adapter returns the wrapped hasher's code | `TestHasher` in `internal/cluster/hasher_test.go` |
 | With `WithStoreDir`, a system starts without a home directory and creates one peer-state file in the directory | `TestClusterConfig_WithStoreDirStartsWithoutAHomeDirectory` in `actor/cluster_config_test.go` |
@@ -561,10 +594,9 @@ Olric and memberlist write plain log lines to an `io.Writer`. `logWriter` in `in
 | Behaviour | Source |
 |---|---|
 | A registry read or write ignores the caller's deadline and cancellation; only the engine's timeouts bound it | `cluster.getRecord` and `cluster.putRecord` in `internal/cluster/cluster.go` |
-| A plain `Spawn` that meets a quorum failure returns Olric's error, which does not match GoAkt's `ErrWriteQuorum` with `errors.Is`; only the singleton path normalises it | `actorSystem.putActorOnCluster` in `actor/actor_system.go`; `actorSystem.retrySpawnSingleton` in `actor/spawn.go` |
+| A plain `Spawn` that meets a quorum failure returns Olric's error, which does not match GoAkt's `ErrWriteQuorum` with `errors.Is`; only the singleton path ([Chapter 21, §21.4](chap-21.md#214-cluster-singletons)) normalises it | `actorSystem.putActorOnCluster` in `actor/actor_system.go`; `actorSystem.retrySpawnSingleton` in `actor/spawn.go` |
 | A read or write quorum greater than the replica count passes `Validate` and fails at `Start`, after three bootstrap attempts | `ClusterConfig.Validate` in `actor/cluster_config.go`; `Config.Validate` in `github.com/tochemey/olric/config/config.go` |
 | A zero timeout or interval in `ClusterConfig` reaches the engine as the engine's default | `WithWriteTimeout` in `internal/cluster/config.go` |
-| `Partition` returns 0 both for an unknown actor and for an actor in partition 0 | `cluster.GetPartition` in `internal/cluster/cluster.go` |
 | A scan reads every key of the map, locks, claims and counters included, before filtering by namespace | `scanNamespace` in `internal/cluster/cluster.go` |
 | `PutGrainIfAbsent` is atomic only on the real engine | `PutGrainIfAbsent` in `internal/cluster/cluster.go` |
 | A schedule-fire claim is never deleted; it lives until its expiry | `cluster.ClaimScheduleFire` in `internal/cluster/cluster.go` |
@@ -578,7 +610,7 @@ Olric and memberlist write plain log lines to an `io.Writer`. `logWriter` in `in
 | The registry repair stops at the first error other than a name owned elsewhere, leaving the remaining actors unrepaired in that pass | `actorSystem.resyncActors` in `actor/actor_system.go` |
 | On a node that sees too few members, an operation on a partition it owns is not refused by the member-count quorum; a refusal by another node is a plain error that `IsQuorumError` does not recognise | `Olric.preconditionFunc` in `github.com/tochemey/olric/olric.go`; `EmbeddedDMap.Put` in `github.com/tochemey/olric/embedded_client.go` |
 | With a member-count quorum above 1, the engine's `Start` waits until the node sees that many members; the bootstrap timeout does not bound that wait | `cluster.startServer` in `internal/cluster/cluster.go`; `RoutingTable.Start` in `github.com/tochemey/olric/internal/cluster/routingtable/routingtable.go` |
-| In one process, the first engine to bootstrap fixes the partition hasher for all later engines | `SetHashFunc` in `github.com/tochemey/olric/internal/cluster/partitions/hkey.go` |
+| Nothing checks that the nodes of a cluster use the same partition hasher | `ClusterConfig.WithPartitionHasher` in `actor/cluster_config.go` |
 | The peer-state file is deleted on stop, so a snapshot never survives a restart | `BoltStore.Close` in `internal/cluster/boltdb_store.go` |
 | `BoltStore.GetPeerState` reports a read or decode error as "not found", which the leader treats as a crash | `BoltStore.GetPeerState` in `internal/cluster/boltdb_store.go` |
 | The record encoders never return an error | `encode` in `internal/cluster/codec.go` |

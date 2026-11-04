@@ -21,7 +21,7 @@
 ## What you will learn
 
 - What `tls.Info` holds, the two options that set it, which one wins, and when the configuration is rejected.
-- Exactly where each of the two TLS configurations is applied: the remoting listener and dialers, the cluster engine, and membership gossip.
+- Exactly where each of the two TLS configurations is applied: the remoting listener and dialers ([Chapter 15](chap-15.md), [Chapter 16](chap-16.md), [Chapter 17](chap-17.md)), the cluster engine ([Chapter 20](chap-20.md)), and membership gossip ([Chapter 19](chap-19.md)).
 - What mutual TLS covers, why the remoting dialers need a server name or `InsecureSkipVerify`, and what stays in plaintext.
 - How the standalone `client` package builds a node, what it forwards from `remote.Config`, and what it leaves at defaults.
 - What each client operation sends, to which node, and what it returns when the actor does not exist.
@@ -41,12 +41,12 @@ Its doc comment asks that both configurations chain to the same root CA, which m
 **Two options set it.** `WithTLS` in `remote/option.go` stores it on the `remote.Config`, read back by `Config.TLS` in `remote/config.go`; a nil return means plaintext. `WithTLS` in `actor/option.go` stores it on the actor system directly and is deprecated. `actorSystem.validate` in `actor/actor_system.go` reconciles the two, in order:
 
 1. If the remote config carries an `Info`, it replaces the deprecated one. When both are set and are different pointers, a warning is logged.
-2. If an `Info` is set **and remoting is enabled**, both `ServerConfig` and `ClientConfig` must be non-nil, otherwise `NewActorSystem` fails with `ErrInvalidTLSConfiguration` (`errors/errors.go`). The docs give the reason: every node both dials and accepts.
-3. With remoting disabled nothing is checked and the `Info` has no effect. Clustering requires remoting, so a clustered system always passes through the check.
+2. If an `Info` is set **and remoting is enabled**, both `ServerConfig` and `ClientConfig` must be non-nil, otherwise `NewActorSystem` ([Chapter 3, §3.2](chap-03.md#32-construction-newactorsystem)) fails with `ErrInvalidTLSConfiguration` (`errors/errors.go`). The docs give the reason: every node both dials and accepts.
+3. With remoting disabled nothing is checked and the `Info` has no effect. A clustered system must have remoting enabled too: `actorSystem.setupCluster` fails `Start` with "clustering needs remoting to be enabled" otherwise ([Chapter 3](chap-03.md), [Chapter 20](chap-20.md)).
 
 Nothing validates the contents of the two configurations: a missing certificate or CA shows up as a listen or handshake failure later ([§18.3](#183-certificates-server-names-and-mutual-tls)).
 
-The resolved `Info` is kept in the `tlsInfo` field (`actor/actor_system.go`) and handed out at start-up: to the remoting client by `actorSystem.setupRemoting`, to the cluster engine by `actorSystem.setupCluster` through `WithTLS` in `internal/cluster/config.go`, and to the remoting server by `actorSystem.startRemoteServer` (`actor/remote_server.go`).
+The resolved `Info` is kept in the `tlsInfo` field (`actor/actor_system.go`) and handed out at start-up: to the remoting client ([Chapter 16](chap-16.md)) by `actorSystem.setupRemoting`, to the cluster engine by `actorSystem.setupCluster` through `WithTLS` in `internal/cluster/config.go`, and to the remoting server ([Chapter 17, §17.4](chap-17.md#174-the-server)) by `actorSystem.startRemoteServer` (`actor/remote_server.go`).
 
 ## 18.2 Where TLS is applied
 
@@ -56,13 +56,25 @@ The resolved `Info` is kept in the `tlsInfo` field (`actor/actor_system.go`) and
 | peers | cluster engine (Olric): registry reads and writes, replication | `ServerConfig` | `ClientConfig` | `cluster.buildConfig` in `internal/cluster/cluster.go` |
 | discovery | membership gossip (memberlist) | `ClientConfig` | `ClientConfig` | `cluster.setupMemberlistConfig` in `internal/cluster/cluster.go` |
 
+```mermaid
+flowchart LR
+    I["tls.Info"] --> S["ServerConfig"]
+    I --> C["ClientConfig"]
+    S --> R1["remoting listener"]
+    S --> P1["cluster engine listener"]
+    C --> R2["remoting dialers"]
+    C --> P2["cluster engine client"]
+    C --> G["membership gossip<br/>listener and dialer"]
+    C --> K["standalone client"]
+```
+
 ### Remoting
 
 **Server.** `actorSystem.startRemoteServer` passes `ServerConfig` with `WithRemotingServerTLSConfig` and calls `RemotingServer.ListenTLS` instead of `Listen` (`internal/net/remoting_server.go`). `TCPServer.ListenTLS` marks the server with `TCPServer.EnableTLS`, which fails with `ErrNoTLSConfig` (`internal/net/sentinel.go`) when no configuration was given, and then opens an ordinary TCP listener (`internal/net/tcp_server.go`). TLS is applied per connection: `TCPServer.serveConn` wraps every accepted socket in a TLS server connection **before** the protocol is chosen, so the first-byte sniff, the duplex handler and the legacy path all read decrypted bytes ([Chapter 15, §15.9](chap-15.md#159-compatibility-two-protocols-on-one-port), "Accepting both"). One listener serves both protocols over TLS.
 
 The TLS handshake runs on the first read. In `auto` and `duplex` modes that read is the one-byte sniff in `TCPServer.sniffFirstByte`, whose deadline, ten seconds or the idle timeout when shorter (`acceptHandshakeTimeout` in `internal/net/remoting_server.go`), therefore bounds the TLS handshake as well.
 
-**Duplex dialer.** The remoting client keeps the `ClientConfig` it was given with `WithClientTLS` (`internal/remoteclient/client.go`). `remotingTransport.Dial` (`internal/remoteclient/peer.go`) dials TCP, clones the configuration for this dial, wraps the socket in a TLS client connection and swaps it into the framed connection. The HELLO exchange and everything after it then travel inside TLS, and compression is applied after HELLO ([Chapter 15, §15.4](chap-15.md#154-the-wire-protocol), "Handshake"). The stack on a duplex lane is therefore TCP, TLS, then the negotiated codec.
+**Duplex dialer.** The remoting client ([Chapter 16, §16.4](chap-16.md#164-peers)) keeps the `ClientConfig` it was given with `WithClientTLS` (`internal/remoteclient/client.go`). `remotingTransport.Dial` (`internal/remoteclient/peer.go`) dials TCP, clones the configuration for this dial, wraps the socket in a TLS client connection and swaps it into the framed connection. The HELLO exchange and everything after it then travel inside TLS, and compression is applied after HELLO ([Chapter 15, §15.4](chap-15.md#154-the-wire-protocol), "Handshake"). The stack on a duplex lane is therefore TCP, TLS, then the negotiated codec.
 
 **Legacy dialer.** `client.newNetClient` (`internal/remoteclient/client.go`) passes a clone of the configuration to `WithTLS` in `internal/net/client.go`. That clone is made once per endpoint, when the pooled legacy client for that address is created (`client.NetClient` caches it), not per socket. `Client.dial` wraps each new socket in TLS first and in the compression wrapper second. The legacy server mirrors that order: its connection wrappers run after TLS.
 
@@ -80,9 +92,10 @@ When an `Info` is set, `cluster.setupMemberlistConfig` replaces memberlist's own
 
 - carries both of memberlist's "packets" and "streams" over TCP; there is no UDP socket;
 - opens a new connection for every packet and every stream, with no reuse (`Transport.writeTo`, `Transport.getConnection`);
-- listens with `ClientConfig` and dials with `ClientConfig`; `ServerConfig` is not used for gossip.
+- listens with `ClientConfig` and dials with `ClientConfig`; `ServerConfig` is not used for gossip;
+- logs a packet that fails to send and returns no error to memberlist (`Transport.WriteTo`, [Chapter 19, §19.6](chap-19.md#196-the-tls-transport)).
 
-Because a packet now costs a TCP connection and a TLS handshake, the cluster changes memberlist's failure detection with TLS (comment on `tlsProbeInterval` in `internal/cluster/cluster.go`): TCP fallback pings are off, since over TCP they only ping a dead node twice, and for every network profile but WAN the probe interval is raised to two seconds and the probe timeout to one second (`tlsProbeInterval`, `tlsProbeTimeout`). The WAN preset is already slower and is kept. Membership itself is [Chapter 19](chap-19.md).
+Because a packet now costs a TCP connection and a TLS handshake, the cluster changes memberlist's failure detection with TLS (comment on `tlsProbeInterval` in `internal/cluster/cluster.go`): TCP fallback pings are off, since over TCP they only ping a dead node twice, and for every network profile but WAN the probe interval is raised to two seconds and the probe timeout to one second (`tlsProbeInterval`, `tlsProbeTimeout`). The WAN preset is already slower and is kept. Membership itself is [Chapter 19, §19.6](chap-19.md#196-the-tls-transport).
 
 ## 18.3 Certificates, server names and mutual TLS
 
@@ -128,7 +141,7 @@ The `client` package lets a program that runs no actor system talk to a cluster.
 
 | Forwarded | Not forwarded, so the remoting client's default applies |
 |---|---|
-| compression, idle timeout, max idle connections, dial timeout, keep-alive, user serializers, `TLS().ClientConfig` | protocol pin, ordinary lanes, large-message destinations, concurrent large transfers, frame, message and chunk sizes, credit window, write and read-idle timeouts, context propagator |
+| compression, idle timeout, max idle connections, dial timeout, keep-alive, user serializers ([Chapter 17, §17.2](chap-17.md#172-serializers)), `TLS().ClientConfig` | protocol pin, ordinary lanes, large-message destinations, concurrent large transfers, frame, message and chunk sizes, credit window, write and read-idle timeouts, context propagator |
 
 `ServerConfig` is ignored, and an `Info` without `ClientConfig` leaves the node in plaintext. Without `WithRemoteConfig` the node gets a remoting client with every default: no compression, no TLS, the protobuf serializer only. The host and port of the `remote.Config` itself are not used.
 
@@ -148,7 +161,7 @@ Because unreachable nodes are skipped, `New` succeeds against a cluster it canno
 
 ## 18.6 Operations
 
-Every operation picks one node with the balancer while holding `Client.locker`, and then uses that node's remoting client. Actor operations need two requests: a lookup on the picked node, then the action on the node that hosts the actor.
+Every operation picks one node with the balancer while holding `Client.locker`, and then uses that node's remoting client. Actor operations need two requests ([Chapter 16, §16.6](chap-16.md#166-routing-which-lane-a-call-takes) covers the lane each takes): a lookup on the picked node, then the action on the node that hosts the actor.
 
 ```mermaid
 sequenceDiagram
@@ -163,7 +176,7 @@ sequenceDiagram
     Note over C,B: the same remoting client, TLS and codec
 ```
 
-In cluster mode the lookup reads the cluster registry, so any node can answer for any actor (`actorSystem.remoteLookupHandler` in `actor/remote_server.go`), and `client.RemoteLookup` (`internal/remoteclient/client.go`) turns a `NOT_FOUND` reply into the `NoSender` address. Node B need not be in the client's list; the node's remoting client dials it like any peer. The lookup and the action are separate requests and nothing holds the actor between them.
+In cluster mode the lookup reads the cluster registry ([Chapter 20, §20.4](chap-20.md#204-the-registry)), so any node can answer for any actor (`actorSystem.remoteLookupHandler` in `actor/remote_server.go`), and `client.RemoteLookup` (`internal/remoteclient/client.go`) turns a `NOT_FOUND` reply into the `NoSender` address. Node B need not be in the client's list; the node's remoting client dials it like any peer. The lookup and the action are separate requests and nothing holds the actor between them.
 
 | Operation | Node and requests | Actor or grain missing | Source |
 |---|---|---|---|
@@ -185,7 +198,7 @@ Details that the table does not show:
 - **`Kinds`** returns the kinds registered on the picked node's cluster configuration (`actorSystem.getKindsHandler`), not a union over the cluster. It holds `Client.locker` for the whole request, so other calls wait for it to pick a node. A server error is returned as a formatted "proto error: code=..., msg=..." string, not as a sentinel.
 - **`Spawn` and `SpawnBalanced`** reject a request carrying `ReliableDelivery` with `ErrReliableSpawnUnsupported` before anything is sent: their doc comments give the reason, the spawning side of a reliable flow must take part in the delivery protocol ([Chapter 23](chap-23.md)). The request is then validated and sanitised by the remoting client, and the picked node spawns the actor locally with `Spawn`, or as a cluster singleton when `Singleton` is set (`actorSystem.remoteSpawnHandler` in `actor/remote_server.go`; [Chapter 21](chap-21.md)). The address of the new actor is discarded.
 - **`Tell`** and `TellGrain` take a `proto.Message`; `Ask` and `AskGrain` take `any`, and a value that is not a `proto.Message` needs a serializer registered on the node's `remote.Config`. A `Tell` that returns `nil` was admitted, not delivered ([Chapter 15, §15.10](chap-15.md#1510-semantics-defaults-and-invariants)), and a later failure is dropped ([§18.5](#185-the-standalone-client-shape-and-construction)).
-- **Grain calls** go to the picked node, which routes them to the grain's owner ([Chapter 14](chap-14.md)). Their errors pass through `Unmark` in `internal/refusal/refusal.go`: a node that refused the message because it is shutting down flags its error reply as refused, the remoting client marks the decoded error (`checkProtoError` in `internal/remoteclient/client.go`), and the client removes the mark before the error reaches the application. The error keeps its text and still matches the same sentinels.
+- **Grain calls** go to the picked node, which routes them to the grain's owner ([Chapter 13, §13.4](chap-13.md#134-finding-a-grain), [Chapter 14](chap-14.md); the server entry points are in [Chapter 17, §17.7](chap-17.md#177-grain-entry-points)). Their errors pass through `Unmark` in `internal/refusal/refusal.go`: a node that refused the message because it is shutting down flags its error reply as refused, the remoting client marks the decoded error (`checkProtoError` in `internal/remoteclient/client.go`), and the client removes the mark before the error reaches the application. The error keeps its text and still matches the same sentinels.
 
 **`TellGrain` options.** `TellGrainOption` in `client/tell_grain_option.go` is a function from a `tellGrainConfig` value to a new one; `newTellGrainConfig` folds the options over a zero value. The only option, `WithOneWay`, sets `isOneWay`. Without it the call returns once the hosting node has processed the message and returns the handler's error; with it the call returns once the message is enqueued, and a handler failure is recorded by the hosting node as a dead letter instead (doc comment of `WithOneWay`).
 
@@ -197,7 +210,7 @@ Details that the table does not show:
 | `RandomStrategy` | `Random` | returns `nodes[rand.IntN(len)]` | `Random.Next` in `client/random.go` |
 | `LeastLoadStrategy` | `LeastLoad` | stable-sorts the slice by weight, ascending, and returns the first | `LeastLoad.Next` in `client/least_load.go` |
 
-Each balancer guards its slice with its own mutex, and `Set` stores the slice it is given without copying. `Next` on an empty slice panics in all three; `New` refuses an empty node list, so this happens only through `SpawnBalanced` after `Close` ([§18.8](#188-refresh-and-shutdown)).
+Each balancer guards its slice with its own mutex, and `Set` stores the slice it is given without copying. `RoundRobin.Next` indexes with `(int(n)-1) % len`, where `n` is the `uint32` counter after the increment; when the counter wraps to 0 the index is -1 and the call panics. `Next` on an empty slice panics in all three; `New` refuses an empty node list, so this happens only through `SpawnBalanced` after `Close` ([§18.8](#188-refresh-and-shutdown)).
 
 `SpawnBalanced` builds a **new** balancer on every call (`getBalancer`), so a round-robin `SpawnBalanced` always starts its counter at zero and picks the first node of the client's slice.
 
@@ -209,19 +222,19 @@ Each balancer guards its slice with its own mutex, and `Set` stores the slice it
 
 | Reply | Result |
 |---|---|
-| transport error | node skipped, weight unchanged |
+| transport error of any kind (refused connection, failed TLS handshake, closed connection, plaintext peer) | node skipped, weight unchanged |
 | `CODE_UNAVAILABLE` or `CODE_DEADLINE_EXCEEDED` | node skipped, weight unchanged |
 | any other error code | error |
 | a response of another type | error |
 | `GetNodeMetricResponse` | weight set to the load |
 
-The figures are fetched at `New` and on each refresh tick, and at no other time. A spawn through the client does not change them, so between refreshes least load sends every call to the same node. The grain engine's least-load placement reads the same metric from its peers (`actorSystem.leastLoadedPeer` in `actor/grain_engine.go`).
+A skipped node keeps its weight, which is 0 unless `WithWeight` or an earlier fetch set it, and least load picks the lowest weight, so a node that never answered is picked first. The figures are fetched at `New` and on each refresh tick, and at no other time. A spawn through the client does not change them, so between refreshes least load sends every call to the same node. The grain engine's least-load placement reads the same metric from its peers ([Chapter 13, §13.3](chap-13.md#133-configuration), [Chapter 21, §21.1](chap-21.md#211-placement-with-spawnon); `actorSystem.leastLoadedPeer` in `actor/grain_engine.go`).
 
-`Kinds` and the metric requests use `SendProto`, which speaks the legacy unary protocol ([Chapter 15, §15.9](chap-15.md#159-compatibility-two-protocols-on-one-port)). A node pinned to `duplex` closes such connections: `Kinds` against it fails, and the metric fetch skips it as unreachable.
+`Kinds` and the metric requests use `SendProto`, which speaks the legacy unary protocol ([Chapter 15, §15.9](chap-15.md#159-compatibility-two-protocols-on-one-port)). A node pinned to `duplex` ([Chapter 15, §15.9](chap-15.md#159-compatibility-two-protocols-on-one-port)) closes such connections: `Kinds` against it fails, and the metric fetch skips it as unreachable.
 
 ## 18.8 Refresh and shutdown
 
-**Refresh.** `WithRefresh(interval)` sets the interval; `New` starts `Client.refreshNodesLoop` in a goroutine only when it is positive. The loop creates a ticker and an inner goroutine that, on each tick, calls `Client.updateNodes` with a background context, and on the close signal stops. Past its lock handling (below), `updateNodes` fetches every node's metric and sets the weights of the nodes that answered; an error from `getNodeMetric` makes the loop **panic**, which ends the process. The refresh requests carry no deadline.
+**Refresh.** `WithRefresh(interval)` sets the interval; `New` starts `Client.refreshNodesLoop` in a goroutine only when it is positive. The loop creates a ticker and an inner goroutine that, on each tick, calls `Client.updateNodes` with a background context, and on the close signal stops. Past its lock handling (below), `updateNodes` fetches every node's metric and sets the weights of the nodes that answered; an error from `getNodeMetric` makes the loop **panic**, which ends the process. The refresh requests carry no deadline: only the dial timeout bounds connecting, and a node that accepts and never answers blocks the loop.
 
 **`updateNodes` starts by unlocking `Client.locker`** and defers locking it again, as if its caller held the lock. The refresh goroutine does not hold it. On a tick when no other call holds the lock, the `Unlock` of an unlocked `sync.Mutex` stops the process with Go's fatal error "sync: unlock of unlocked mutex", which `recover` cannot catch. On a tick when another call holds the lock, the refresh releases that call's lock, and that call's own `Unlock` then either hits the same fatal error or releases the lock the refresh's deferred `Lock` took back. So a positive `WithRefresh` interval either ends the process or breaks the client's locking at the first tick.
 
@@ -249,8 +262,8 @@ The figures are fetched at `New` and on each refresh tick, and at no other time.
 | Three cluster engines with TLS join, see each other and read each other's registry writes | `TestMultipleNodes` in `internal/cluster/cluster_test.go` |
 | The Olric configuration gets a TLS block and a client TLS setting when an `Info` is set | `TestBuildConfigWithTLSAndDebug` in `internal/cluster/cluster_test.go` |
 | With TLS, memberlist gets the TCP transport and no TCP pings; the LAN and local profiles probe at two seconds with a one-second timeout, WAN keeps its preset | `TestSetupMemberlistConfigWithTLS` in `internal/cluster/cluster_test.go` |
-| A TLS transport that cannot bind fails the memberlist setup | `TestSetupMemberlistConfigReturnsTLSTransportError` in `internal/cluster/cluster_test.go` |
-| Two memberlist nodes on the TLS transport join and deliver best-effort and reliable messages | `TestTCPTransport` in `internal/memberlist/transport_test.go` |
+| A TLS transport that cannot be built (a bind host that is not an IP literal) fails the memberlist setup | `TestSetupMemberlistConfigReturnsTLSTransportError` in `internal/cluster/cluster_test.go` |
+| Two memberlist nodes on the TLS transport join and deliver best-effort and reliable messages; `WriteTo` returns no error when a send fails | `TestTCPTransport` in `internal/memberlist/transport_test.go` |
 | The test fixtures are a mutual-TLS pair that completes a handshake | `TestLoad` and `TestLoadHandshake` in `internal/tlstest/tlstest_test.go` |
 | A node's remoting client uses the remote config's `ClientConfig`; no `Info`, or an `Info` without `ClientConfig`, leaves it without TLS | `TestNodeTLS` in `client/node_test.go` |
 | A node's remoting client gets the remote config's user serializers | `TestWithRemoteConfigForwardsSerializers` in `client/node_test.go` |
@@ -296,6 +309,9 @@ The figures are fetched at `New` and on each refresh tick, and at no other time.
 | `Kinds` and the load fetch use the legacy protocol, which a `duplex`-pinned node refuses | `Client.Kinds` and `getNodeMetric` in `client/client.go` |
 | Actor operations are a lookup and a separate action; the action may go to a node outside the configured list | `Client.Tell` in `client/client.go` |
 | A round-robin `SpawnBalanced` always picks the first node | `Client.SpawnBalanced` and `getBalancer` in `client/client.go` |
+| Any transport error while fetching a load, including a failed TLS handshake, marks the node as skipped; it keeps weight 0 unless one was set, so least load picks it | `getNodeMetric` in `client/client.go`; `LeastLoad.Next` in `client/least_load.go` |
+| `RoundRobin.Next` panics when its `uint32` counter wraps to 0 | `RoundRobin.Next` in `client/round_robin.go` |
+| A packet that fails to send over the gossip TLS transport is logged and not reported to memberlist | `Transport.WriteTo` in `internal/memberlist/transport.go`; [Chapter 19, §19.6](chap-19.md#196-the-tls-transport) |
 | Least load reorders the caller's node slice and, between refreshes, picks the same node every time | `LeastLoad.Next` in `client/least_load.go` |
 | A refresh tick unlocks `Client.locker` without holding it: the process dies with "sync: unlock of unlocked mutex", or the client's locking breaks; a metric error during refresh panics; refresh requests have no deadline | `Client.refreshNodesLoop` and `Client.updateNodes` in `client/client.go` |
 | After `Close`, calls still reach the nodes and open connections that nothing closes, `SpawnBalanced` panics, and a second `Close` with refresh panics | `Client.Close` and `Client.SpawnBalanced` in `client/client.go`; `client.Close` in `internal/remoteclient/client.go` |

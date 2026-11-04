@@ -28,7 +28,7 @@
 - How a GoAkt provider is plugged into Olric and memberlist, in which order Olric calls it, and how often.
 - How each of the eight built-in providers registers a node and finds its peers, and where each one bends the contract.
 - How a network profile selects memberlist's failure detection preset, and what TLS changes.
-- How the TCP transport carries memberlist traffic when TLS is on.
+- How the TCP transport carries memberlist traffic when TLS is on ([Chapter 18, §18.2](chap-18.md#182-where-tls-is-applied)).
 
 ## 19.1 Three ports and a node's identity
 
@@ -40,16 +40,24 @@ A clustered node listens on three ports. All three are fields of `Node` in `disc
 | `PeersPort` | Olric's own server: the registry map and the cluster events pub/sub ([Chapter 20](chap-20.md)) | `ClusterConfig.WithPeersPort` in `actor/cluster_config.go` |
 | `RemotingPort` | GoAkt remoting ([Chapter 15](chap-15.md)) | the remoting configuration |
 
-`actorSystem.setupCluster` in `actor/actor_system.go` builds the node on every `Start`, before the cluster engine starts, together with a new cluster engine around the configured provider. It refuses to cluster without remoting (`clustering needs remoting to be enabled`). The node's fields come from two places:
+`actorSystem.setupCluster` in `actor/actor_system.go` builds the node on every `Start` ([Chapter 3, §3.3](chap-03.md#33-start)), before the cluster engine ([Chapter 20, §20.1](chap-20.md#201-the-engine-and-what-it-delegates)) starts, together with a new cluster engine around the configured provider. It refuses to cluster without remoting (`clustering needs remoting to be enabled`). The node's fields come from two places:
 
-- `Name` is the actor system name; `Host` is the remoting bind address and `RemotingPort` the remoting bind port, both after `actorSystem.validate` has sanitised the remoting configuration when the actor system was created ([Chapter 17](chap-17.md)). Sanitising resolves the address with `net.ResolveTCPAddr` (`GetHostPort` in `internal/net/helper.go`), so `Host` is always an IP literal: a host name is replaced by its first resolved IP, once, and a wildcard by a concrete interface address;
+- `Name` is the actor system name ([Chapter 3](chap-03.md)); `Host` is the remoting bind address and `RemotingPort` the remoting bind port, both after `actorSystem.validate` has sanitised the remoting configuration when the actor system was created ([Chapter 17](chap-17.md)). Sanitising resolves the address with `net.ResolveTCPAddr` (`GetHostPort` in `internal/net/helper.go`), so `Host` is always an IP literal: a host name is replaced, once, by an IPv4 address it resolves to (or its first address when it has none), and a wildcard by a concrete interface address;
 - `DiscoveryPort`, `PeersPort` and `Roles` come from the cluster configuration. `ClusterConfig.getRoles` in `actor/cluster_config.go` returns the roles sorted with duplicates removed.
 
-`ClusterConfig.Validate` in `actor/cluster_config.go` requires a provider, a positive discovery port and a positive peers port. It does not check that they differ from each other or from the remoting port.
+Among its other checks ([Chapter 20, §20.2](chap-20.md#202-configuration)), `ClusterConfig.Validate` in `actor/cluster_config.go` requires a provider, a positive discovery port and a positive peers port. It does not check that they differ from each other or from the remoting port.
 
 **How peers learn the node.** `cluster.buildConfig` in `internal/cluster/cluster.go` serialises the whole `Node` to JSON and hands it to Olric as the member metadata. Olric encodes it, with the member's name and birth time, into the node metadata that memberlist gossips with the member (`Member.Encode` in `github.com/tochemey/olric/internal/discovery/member.go`). Memberlist caps that metadata at `MetaMaxSize` (512 bytes, `github.com/hashicorp/memberlist/net.go`) and panics in `Memberlist.setAlive` when it is longer; GoAkt does not check the size, so a very long system name or role list stops the node at boot. Olric binds its server to `Host:PeersPort`, and names the memberlist member after that address (`prepareConfig` in `github.com/tochemey/olric/olric.go`). A provider therefore only has to deliver discovery addresses: the peers port, the remoting port and the roles of every member travel in the metadata once the node is a member.
 
-**From metadata to `Peer`.** `cluster.Members` in `internal/cluster/cluster.go` turns each member into a `Peer` through `toPeer` in the same file, which decodes the member's metadata back into a `Node`, sorts and compacts its roles, and returns a `Peer` (`internal/cluster/peer.go`) with the three ports, the roles, whether the member is the coordinator, and its birth time as `CreatedAt`. `cluster.Peers` drops the entry whose peers address equals the local node's. `ToRemotePeers` and `ToRemotePeer` in `internal/cluster/peer.go` copy them into the public `Peer` in `remote/peer.go`, which is what `ActorSystem.Peers` and `ActorSystem.Leader` return; the public type has no coordinator flag. Both types build their addresses with `net.JoinHostPort`, so an IPv6 host comes out bracketed (`Node.PeersAddress` and `Node.DiscoveryAddress` in `discovery/node.go`; `Peer.PeersAddress` and `Peer.RemotingAddress` in `remote/peer.go`).
+**From metadata to `Peer`.** `cluster.Members` in `internal/cluster/cluster.go` turns each member into a `Peer` through `toPeer` in the same file, which decodes the member's metadata back into a `Node` (metadata that does not decode leaves the fields zero), sorts and compacts its roles, and returns a `Peer` (`internal/cluster/peer.go`) with the three ports, the roles, whether the member is the coordinator, and its birth time as `CreatedAt`. `cluster.Peers` drops the entry whose peers address equals the local node's. `ToRemotePeers` and `ToRemotePeer` in `internal/cluster/peer.go` copy them into the public `Peer` in `remote/peer.go`, which is what `ActorSystem.Peers` and `ActorSystem.Leader` return ([Chapter 20, §20.8](chap-20.md#208-peers-members-and-the-leader)); the public type has no coordinator flag. Both types build their addresses with `net.JoinHostPort`, so an IPv6 host comes out bracketed (`Node.PeersAddress` and `Node.DiscoveryAddress` in `discovery/node.go`; `Peer.PeersAddress` and `Peer.RemotingAddress` in `remote/peer.go`).
+
+```mermaid
+flowchart LR
+    N["discovery.Node"] -->|"JSON, buildConfig"| M["Olric member metadata"]
+    M -->|"memberlist gossip"| R["metadata on every member"]
+    R -->|"toPeer"| P["cluster Peer"]
+    P -->|"ToRemotePeer"| Q["remote.Peer"]
+```
 
 `Node.String` prints the discovery port under the label `gossip`.
 
@@ -82,8 +90,8 @@ type Provider interface {
 
 **The boot rule.** The interface comments state what the cluster expects:
 
-1. The cluster calls `Register` when the node boots, before `DiscoverPeers`. **Once `Register` has returned, `DiscoverPeers` on the other nodes must list this node**, so that two nodes booting at the same moment cannot both miss each other.
-2. The cluster calls `DiscoverPeers` when the node boots and joins the nodes it returns. With the default minimum peers quorum of 1, it is not called again once it has succeeded.
+1. The cluster ([Chapter 20, §20.3](chap-20.md#203-start-and-stop)) calls `Register` when the node boots, before `DiscoverPeers`. **Once `Register` has returned, `DiscoverPeers` on the other nodes must list this node**, so that two nodes booting at the same moment cannot both miss each other.
+2. The cluster calls `DiscoverPeers` when the node boots and joins the nodes it returns. With the default minimum peers quorum of 1 ([Chapter 20, §20.2](chap-20.md#202-configuration)), it is not called again once it has succeeded.
 3. A list that holds no other node means this node is alone and forms a cluster of one. **Two clusters formed separately never merge.**
 4. An error makes the cluster retry, once a second for ten seconds, before the node forms a cluster alone. A provider whose view may be incomplete must therefore return an error rather than a list without any other node.
 
@@ -131,9 +139,9 @@ sequenceDiagram
 
 **After boot.** `RoutingTable.Start` (`github.com/tochemey/olric/internal/cluster/routingtable/routingtable.go`) starts `RoutingTable.rejoinLoop` only when the member-count quorum is above one, that is when `WithMinimumPeersQuorum` is 2 or more. Every `DefaultRejoinInterval` (five seconds) it calls `RoutingTable.tryRejoin`, which, while the quorum is not met, calls `DiscoverPeers` again and joins what it returns. With the default quorum of 1 there is no such loop: the provider is read only during the join attempts above. Everything else about membership after boot is memberlist gossip and probing ([§19.5](#195-memberlist-configuration-and-network-profiles)).
 
-**Shutdown order.** Stopping the cluster shuts Olric down ([Chapter 20](chap-20.md)), and `Discovery.Shutdown` in Olric then, in order: broadcasts a leave message with `Memberlist.Leave`, bounded by `DefaultLeaveTimeout` (five seconds); calls **`Deregister`**, logging and ignoring its error; shuts memberlist down; and finally calls **`Close`**, also logging and ignoring its error. Memberlist is shut down, and with it the transport, only if `Discovery.Start` got as far as creating it. A graceful stop therefore leaves the cluster before it leaves the provider's directory.
+**Shutdown order.** Stopping the cluster shuts Olric down ([Chapter 20, §20.3](chap-20.md#203-start-and-stop)), and `Discovery.Shutdown` in Olric then, in order: broadcasts a leave message with `Memberlist.Leave`, bounded by `DefaultLeaveTimeout` (five seconds); calls **`Deregister`**, logging and ignoring its error; shuts memberlist down; and finally calls **`Close`**, also logging and ignoring its error. Memberlist is shut down, and with it the transport, only if `Discovery.Start` got as far as creating it. A graceful stop therefore leaves the cluster before it leaves the provider's directory.
 
-**The provider instance is reused.** `retryBootstrap` in `internal/cluster/cluster.go` runs the whole bootstrap up to three times ([Chapter 20](chap-20.md)). An attempt that fails after Olric has started shuts its Olric server down, which deregisters and closes the provider, and the next attempt initialises and registers **the same provider instance** again. A `Start` after a `Stop` does the same, since the cluster configuration keeps the provider. A provider must therefore accept `Initialize` and `Register` after `Deregister` and `Close`. Each subsection of [§19.4](#194-the-eight-providers) says what `Deregister` and `Close` leave behind.
+**The provider instance is reused.** `retryBootstrap` in `internal/cluster/cluster.go` runs the whole bootstrap up to three times ([Chapter 20, §20.3](chap-20.md#203-start-and-stop)). An attempt that fails after Olric has started shuts its Olric server down, which deregisters and closes the provider, and the next attempt initialises and registers **the same provider instance** again. A `Start` after a `Stop` ([Chapter 3, §3.7](chap-03.md#37-starting-again)) does the same, since the cluster configuration keeps the provider. A provider must therefore accept `Initialize` and `Register` after `Deregister` and `Close`. Each subsection of [§19.4](#194-the-eight-providers) says what `Deregister` and `Close` leave behind.
 
 ## 19.4 The eight providers
 
@@ -172,7 +180,7 @@ Five providers take the node's own address in their configuration (Consul, etcd 
 - **Initialize** (`Discovery.Initialize` in `discovery/etcd/discovery.go`) creates the client and calls `MemberList`, bounded by `DialTimeout`, which succeeds through any reachable endpoint. All keys go through a namespace prefix `<ActorSystemName>/`.
 - **Register** grants a lease of `TTL` seconds, writes the key `Host:DiscoveryPort` with the same value under it, and starts the keep-alive, whose responses a goroutine drains. A failed write or keep-alive revokes the lease at once.
 - **DiscoverPeers** reads the prefix within `Timeout` and returns every value except the local key.
-- **Deregister** (`Discovery.deregisterLocked`) cancels the keep-alive and revokes the lease on a best-effort basis; if etcd is unreachable, the key disappears when the lease expires. `Close` deregisters if needed, closes the client and clears the initialised flag, so the provider can be initialised again.
+- **Deregister** (`Discovery.deregisterLocked`) cancels the keep-alive and revokes the lease on a best-effort basis; if etcd is unreachable, the key disappears when the lease expires. `Close` deregisters if needed, closes the client and clears the initialised flag, so the provider can be initialised again; when closing the client fails, it returns that error and leaves the flag and the client in place.
 
 A node that dies without deregistering stays listed until its lease expires, at most `TTL` seconds later.
 
@@ -192,13 +200,13 @@ The calling pod matches its own selector, so it is in its own result once the AP
 
 - **Register** (`Discovery.Register` in `discovery/mdns/discovery.go`) announces a unique instance, `ServiceName` plus an eight-character random suffix, with a host name derived from the instance so no operating-system lookup is needed and host names never collide. It carries the cluster name in a TXT record `name=<ServiceName>`, which is what lets several nodes of one cluster share a service and domain. The addresses announced come from `advertisedAddresses`: every non-loopback address of the interfaces that are up and multicast capable, IPv4 first, then global IPv6, and link-local IPv6 only when there is no global one. They are **not** the node's configured host.
 - **DiscoverPeers** browses for `browseTimeout` (five seconds) and collects the answers concurrently, because the library drops entries it cannot hand over. The query goes over IPv4 multicast only; the comment explains that the library gives up on the first family that fails, and an IPv6 multicast send needs an interface scope it sets only when pinned to one interface. `Discovery.matches` keeps entries with the same port, the same service and domain suffix, and the cluster's TXT record. `Discovery.addresses` returns `ip:port` for each entry's IPv4 address, and its IPv6 address too when `IPv6` is set, sorted and deduplicated. The node's own responder answers its query, so **the list includes the local node**.
-- **Initialize** returns `ErrAlreadyInitialized` only while registered, as `Register` is what sets the flag; `Register` does not require `Initialize`, so it skips validation when called alone. **Deregister** clears it, shuts the responder down and closes an internal channel. `Close` does nothing.
+- **Initialize** returns `ErrAlreadyInitialized` only while registered, as `Register` is what sets the flag; `Register` does not require `Initialize`, so it skips validation when called alone. **Deregister** clears it, shuts the responder down and closes `stopChan`, a channel that `NewDiscovery` creates once and that nothing reads. `Close` does nothing. `Register` fails with `no address to advertise for mDNS discovery` when no interface qualifies.
 
 ### NATS
 
-`Config` in `discovery/nats/config.go` requires `NatsServer`, `NatsSubject`, `Host` and a positive `DiscoveryPort`; `ServerAddrValidator.Validate` checks that `NatsServer` starts with `nats` and carries a valid `host:port` after `nats://`. `Discovery.Initialize` in `discovery/nats/discovery.go` sets the defaults (a one-second `Timeout`, five `MaxJoinAttempts`, a two-second `ReconnectWait`), and connects with unlimited reconnects, retrying the first connection up to `MaxJoinAttempts` times with the reconnect wait as its delay. `WithLogger` in `discovery/nats/option.go` sets the logger.
+`Config` in `discovery/nats/config.go` requires `NatsServer`, `NatsSubject`, `Host` and a positive `DiscoveryPort`; `ServerAddrValidator.Validate` checks that `NatsServer` starts with `nats` and carries a valid `host:port` after `nats://`; it takes the part after the first `nats://` without checking that the separator is there. `Discovery.Initialize` in `discovery/nats/discovery.go` sets the defaults (a one-second `Timeout`, five `MaxJoinAttempts`, a two-second `ReconnectWait`), and connects with unlimited reconnects, retrying the first connection up to `MaxJoinAttempts` times with the reconnect wait as its delay. `WithLogger` in `discovery/nats/option.go` sets the logger.
 
-- **Register** subscribes to the subject. The handler answers a `REQUEST` message with this node's host and discovery port on the request's reply subject, and only logs a `DEREGISTER` message. `Register` does not check that the provider was initialised, and `Deregister` checks only the registered flag.
+- **Register** subscribes to the subject. The handler answers a `REQUEST` message with this node's host and discovery port on the request's reply subject, and only logs a `DEREGISTER` message. `Register` does not check that the provider was initialised (it uses the connection `Initialize` creates), and `Deregister` checks only the registered flag.
 - **DiscoverPeers** subscribes to a fresh inbox through a buffered channel of `peerResponseBuffer` (32) messages, publishes a `REQUEST` on the subject with that inbox as the reply address, and collects answers for the whole `Timeout`. It drops the answer whose `host:port` equals its own and returns the rest in arrival order. A message it cannot decode ends the call with that error. The call always lasts `Timeout`, and an empty result is `nil` with no error.
 - **Deregister** (`Discovery.deregisterLocked`) unsubscribes and publishes a `DEREGISTER` message. `Close` deregisters if needed, clears the initialised flag, flushes and closes the connection.
 
@@ -210,7 +218,7 @@ The messages are `internalpb.NatsMessage` protobufs. Only the nodes that answer 
 
 **The packet** is plain text, `goakt-v1|<ClusterName>|<SelfAddress>` (`broadcast.encodePacket` in `discovery/selfmanaged/broadcast.go`). Nothing limits its size on the sending side; the receiver reads into a buffer of `maxPacketSize` (512 bytes). `broadcast.handlePacket` drops a packet with another version or cluster name, or whose address is not a `host:port` with a non-empty host and a numeric port, and otherwise records the address with the time it was heard.
 
-**Sockets.** `broadcast.start` uses one socket to receive and one to send. Loopback mode is chosen by `Config.isLoopbackBroadcast` in `discovery/selfmanaged/config.go`, which is true only when `BroadcastAddress` holds the four-byte form of an IPv4 address whose first byte is 127. `net.IPv4` and `net.ParseIP` return the sixteen-byte form, so `net.IPv4(127, 0, 0, 1)` selects the default mode, and packets are sent to `127.0.0.1` itself (`Config.broadcastIP`).
+**Sockets.** `broadcast.start` uses one socket to receive and one to send. Loopback mode is chosen by `Config.isLoopbackBroadcast` in `discovery/selfmanaged/config.go`, which is true only when `BroadcastAddress` is at least four bytes long and starts with byte 127, that is the four-byte form of a 127.x.x.x address. `net.IPv4` and `net.ParseIP` return the sixteen-byte form, so `net.IPv4(127, 0, 0, 1)` selects the default mode, and packets are sent to `127.0.0.1` itself (`Config.broadcastIP`).
 
 | Mode | Receive socket | Send target |
 |---|---|---|
@@ -236,7 +244,7 @@ On other platforms the receive socket has no reuse option, so only one node per 
 1. It maps the network profile to a memberlist preset (`memberlistEnv` in `internal/cluster/config.go`) and asks Olric for it (`NewMemberlistConfig` in `github.com/tochemey/olric/config/memberlist.go`). An unknown profile is an error.
 2. It binds and advertises memberlist on `Host:DiscoveryPort`. Olric rejects an advertise address that is not an IP literal (`Config.validateMemberlistConfig` in `github.com/tochemey/olric/config/memberlist.go`). On the actor system path `Host` is always one, because sanitising the remoting configuration resolved it ([§19.1](#191-three-ports-and-a-nodes-identity)); a node configured with a host name therefore advertises the IP that name resolved to when the actor system was created.
 3. It sets the memberlist label to `prefix-<actor system name in lower case>`. The comment gives the reason: in Kubernetes, a pod IP can be reused by a pod of another namespace, and the label makes memberlist reject gossip from a node of another ring that arrives from a reused IP.
-4. With TLS configured, it installs the TCP transport of [§19.6](#196-the-tls-transport) and adjusts failure detection (below).
+4. With TLS configured ([Chapter 18](chap-18.md)), it installs the TCP transport of [§19.6](#196-the-tls-transport) and adjusts failure detection (below).
 
 **Profiles.** `NetworkProfile` in `internal/cluster/config.go` has three values, re-exported by `actor/cluster_config.go`. `NetworkProfileLAN` is the default in both `defaultConfig` and `NewClusterConfig`. `ClusterConfig.Validate` in `actor/cluster_config.go` rejects an undefined profile, using `NetworkProfile.Valid`.
 
@@ -258,13 +266,13 @@ The presets are in `github.com/hashicorp/memberlist/config.go`. Apart from the a
 
 - **join**: the provider's addresses are joined once at boot ([§19.3](#193-from-provider-to-olric)); memberlist then gossips the new member to everyone, metadata included;
 - **leave**: a graceful stop broadcasts a leave message before it deregisters from the provider ([§19.3](#193-from-provider-to-olric));
-- **failure**: a crashed node is found by probing, and confirmed after the suspicion window the profile implies. The cluster engine then waits for the routing table to converge, at most `WithConvergenceTimeout` (ten seconds by default), before it announces `NodeLeft`. That wait, the events and everything that follows a departure belong to [Chapter 20](chap-20.md) and [Chapter 21](chap-21.md).
+- **failure**: a crashed node is found by probing, and confirmed after the suspicion window the profile implies. The cluster engine then waits for the routing table to converge, at most `WithConvergenceTimeout` (ten seconds by default), before it announces `NodeLeft`. That wait and the events belong to [Chapter 20, §20.9](chap-20.md#209-cluster-events); what every node does after a departure belongs to [Chapter 21, §21.6](chap-21.md#216-what-every-node-does-on-nodeleft).
 
-Partitions are not resolved here either: a node only refuses registry operations while it sees fewer members than the quorum ([Chapter 20](chap-20.md)).
+Partitions are not resolved here either: a node only refuses registry operations while it sees fewer members than the quorum ([Chapter 20, §20.11](chap-20.md#2011-network-partitions)).
 
 ## 19.6 The TLS transport
 
-Without TLS, memberlist uses its own transport: UDP packets and TCP streams on the discovery port. With TLS, `Transport` in `internal/memberlist/transport.go` replaces it. It implements memberlist's `NodeAwareTransport` with TCP for both of memberlist's channel kinds, a new connection per operation and no connection reuse.
+Without TLS, memberlist uses its own transport: UDP packets and TCP streams on the discovery port. With TLS ([Chapter 18](chap-18.md)), `Transport` in `internal/memberlist/transport.go` replaces it. It implements memberlist's `NodeAwareTransport` with TCP for both of memberlist's channel kinds, a new connection per operation and no connection reuse.
 
 **Construction.** `NewTransport` binds its listeners and starts accepting at once, before memberlist exists. It binds one TCP listener per address in `TransportConfig.BindAddrs` (`internal/memberlist/transport_config.go`), all on the same port; an empty list binds `0.0.0.0`, and a port of zero takes the kernel's port from the first listener. Each address must be an IP literal. With `TLSEnabled`, the listener is a TLS listener. `cluster.setupMemberlistConfig` passes the node's host and discovery port, five-second packet dial and write timeouts, the cluster logger, and **the client TLS configuration**, which the transport uses both to listen and to dial (`Transport.getConnection`).
 
@@ -306,7 +314,7 @@ The advertised address is in the packet because the receiver would otherwise see
 | A self-managed packet with another version, another cluster name or a malformed address is ignored; the local address is excluded; a silent peer expires | `TestBroadcast_handlePacket`, `TestBroadcast_getPeers_excludesSelf` and `TestBroadcast_getPeers_excludesExpired` in `discovery/selfmanaged/broadcast_test.go` |
 | A self-managed node that has heard no packet returns an empty list with no error; `Close` can be called twice | `TestDiscovery_DiscoverPeers` and `TestDiscovery_Close` in `discovery/selfmanaged/discovery_test.go` |
 | DNS-SD returns bare IP addresses | `TestDiscovery` in `discovery/dnssd/discovery_test.go` |
-| Static discovery returns the configured hosts; its configuration rejects a host without a port | `TestDiscovery` in `discovery/static/discovery_test.go`; `TestConfig` in `discovery/static/config_test.go` |
+| Static discovery returns one address per configured host; its configuration rejects a host without a port | `TestDiscovery` in `discovery/static/discovery_test.go`; `TestConfig` in `discovery/static/config_test.go` |
 
 ## Implementation details (may change)
 
@@ -334,5 +342,8 @@ The advertised address is in the packet because the receiver would otherwise see
 | An etcd node that dies without deregistering stays listed for up to `TTL` seconds, and cancelling `Config.Context` removes a live node once its lease expires | `Discovery.Register` in `discovery/etcd/discovery.go` |
 | mDNS announces every multicast-capable interface address, not the node's configured host | `advertisedAddresses` in `discovery/mdns/discovery.go` |
 | The Kubernetes provider is marked initialised by `Register`, not `Initialize` | `Discovery.Register` in `discovery/kubernetes/discovery.go` |
+| A second `Deregister` of an mDNS provider that was registered, deregistered and registered again closes `stopChan` twice and panics with `close of closed channel`; Olric calls `Deregister` on every shutdown of its discovery ([§19.3](#193-from-provider-to-olric)) | `Discovery.Deregister` in `discovery/mdns/discovery.go` |
+| A NATS `NatsServer` that starts with `nats` but has no `nats://` prefix, such as `nats:4222`, makes `Config.Validate` panic with an index out of range | `ServerAddrValidator.Validate` in `discovery/nats/config.go` |
+| A failed `Close` of the etcd client leaves the etcd provider initialised, so the next `Initialize` returns `ErrAlreadyInitialized`, which the adapter swallows, and the old client is kept | `Discovery.Close` in `discovery/etcd/discovery.go` |
 | With TLS, memberlist listens with the client TLS configuration, so that configuration must carry a certificate the peers accept as a server certificate; the server configuration is not used for gossip | `cluster.setupMemberlistConfig` in `internal/cluster/cluster.go`; `NewTransport` in `internal/memberlist/transport.go` |
 | A failed memberlist packet send over the TLS transport is never reported to memberlist | `Transport.WriteTo` in `internal/memberlist/transport.go` |

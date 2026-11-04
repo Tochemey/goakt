@@ -22,13 +22,13 @@
 
 ## What you will learn
 
-- How `SpawnOn` chooses a node, what each placement strategy costs, and what travels to the chosen node.
-- How one name stays unique across the cluster, and when a name held by a dead node can be taken over.
-- Which actors and grains are recreated when their node leaves, and which are lost with it.
+- How `SpawnOn` chooses a node, what each placement strategy costs, and what travels to the chosen node ([Chapter 17](chap-17.md) covers the receiving side).
+- How one name stays unique across the cluster ([Chapter 20](chap-20.md) covers the registry), and when a name held by a dead node can be taken over.
+- Which actors and grains ([Chapter 13](chap-13.md)) are recreated when their node leaves, and which are lost with it.
 - Where a cluster singleton runs, how concurrent callers converge on one instance, and what moves it.
-- What every node does on `NodeLeft`, and how the leader relocates a departed node after a graceful leave and after a crash.
+- What every node does on `NodeLeft` ([Chapter 20, §20.9](chap-20.md#209-cluster-events)), and how the leader relocates a departed node after a graceful leave and after a crash.
 - How the relocator, its workers and the `RelocateBatch` handler split, send and recreate the work, and how failures are counted.
-- What the handoff window hides from senders, and why `SendSync` waits while `SendAsync` fails with `ErrRelocationInProgress`.
+- What the handoff window hides from senders, and why `SendSync` waits while `SendAsync` fails with `ErrRelocationInProgress` ([Chapter 5, §5.8](chap-05.md#58-sending-by-name)).
 
 ## 21.1 Placement with `SpawnOn`
 
@@ -40,10 +40,25 @@
 4. Check the name against the registry with `checkOrdinarySpawnPreconditions` ([§21.2](#212-one-name-in-the-whole-cluster)).
 5. Outside a cluster, call `Spawn`.
 6. Reject a reliable endpoint that names an explicit peer address (`spawnConfig.rejectReliableRemotePlacement` in `actor/spawn_option.go`).
-7. Read the members, the local node included (`cluster.Members` in `internal/cluster/cluster.go`). With no member, call `Spawn`.
+7. Read the members, the local node included (`cluster.Members` in `internal/cluster/cluster.go`, [Chapter 20, §20.8](chap-20.md#208-peers-members-and-the-leader)). With no member, call `Spawn`.
 8. With `WithRole`, keep only the members that advertise the role; none left is an error, "no nodes with role … found in the cluster" (`actorSystem.filterPeersByRole` in `actor/grain_engine.go`).
 9. Pick a member with the placement strategy (`actorSystem.selectPlacementPeer` in `actor/spawn.go`). No member picked means `Spawn` on this node. `HashBased` picks none when this node owns the name's partition.
 10. Otherwise send a `RemoteSpawn` request to the member's remoting port and return a remote PID for the address it answers with.
+
+```mermaid
+flowchart TD
+    Start[SpawnOn] --> DC{"WithDataCenter?"}
+    DC -->|yes| Remote[RemoteSpawn to a random endpoint of that data center]
+    DC -->|no| Name[check the name in the registry]
+    Name --> Cl{"in a cluster?"}
+    Cl -->|no| Local[Spawn on this node]
+    Cl -->|yes| Role[members, filtered by WithRole]
+    Role --> Pick{"placement strategy"}
+    Pick -->|no peer picked| Local
+    Pick -->|peer picked| RS[RemoteSpawn to its remoting port]
+    RS --> Done[remote PID, after the registry record exists]
+    Local --> Done2[local PID]
+```
 
 The strategies (`SpawnPlacement` in `actor/spawn_option.go`; `RoundRobin` is the default set by `newSpawnConfig`):
 
@@ -57,7 +72,7 @@ The strategies (`SpawnPlacement` in `actor/spawn_option.go`; `RoundRobin` is the
 
 A node's load is its count of live non-system actors plus its active grains (`actorSystem.getNodeMetricHandler` in `actor/remote_server.go`).
 
-**What travels.** The `RemoteSpawn` request carries the name, the kind, the relocatable flag, the passivation strategy, the dependencies, stashing, reentrancy, the supervisor, the role, an explicit init timeout and the reliable-delivery spec (`actorSystem.SpawnOn` in `actor/spawn.go`). The mailbox does not: it is a Go value, so an actor placed on another node runs on the default mailbox (`WithMailbox` in `actor/spawn_option.go`). The target instantiates the actor from its registered kind, rebuilds the options and calls its own `Spawn`, which runs the full local path of [Chapter 4, §4.2](chap-04.md#42-the-local-spawn-path-step-by-step), registry write included (`actorSystem.remoteSpawnHandler` in `actor/remote_server.go`, covered in [Chapter 17](chap-17.md)). **`SpawnOn` therefore returns only after the registry record exists**, like `Spawn`.
+**What travels.** The `RemoteSpawn` request carries the name, the kind, the relocatable flag, the passivation strategy ([Chapter 10](chap-10.md#101-strategies)), the dependencies ([Chapter 12, §12.2](chap-12.md#122-dependencies)), stashing ([Chapter 8, §8.4](chap-08.md#84-the-stash)), reentrancy ([Chapter 8, §8.5](chap-08.md#85-reentrancy-requests-that-do-not-block)), the supervisor ([Chapter 9](chap-09.md#91-the-supervisor-value)), the role, the name of the dispatcher ([Chapter 7](chap-07.md#named-dispatchers)), an explicit init timeout and the reliable-delivery spec (`actorSystem.SpawnOn` in `actor/spawn.go`; `Spawn` with `WithHostAndPort` builds the same request). The mailbox does not: it is a Go value, so an actor placed on another node runs on the default mailbox ([Chapter 6](chap-06.md); `WithMailbox` in `actor/spawn_option.go`). The target applies the dispatcher name with `WithDispatcher`. The target instantiates the actor from its registered kind, rebuilds the options and calls its own `Spawn`, which runs the full local path of [Chapter 4, §4.2](chap-04.md#42-the-local-spawn-path-step-by-step), registry write included (`actorSystem.remoteSpawnHandler` in `actor/remote_server.go`, covered in [Chapter 17, §17.6](chap-17.md#176-actor-lifecycle-and-query-handlers)). **`SpawnOn` therefore returns only after the registry record exists**, like `Spawn`.
 
 ## 21.2 One name in the whole cluster
 
@@ -89,14 +104,14 @@ An actor relocates when it is relocatable, the system has relocation enabled, an
 | Actor | Relocatable | Source |
 |---|---|---|
 | top-level actor from `Spawn` or `SpawnOn` | yes, unless `WithRelocationDisabled` | `newSpawnConfig` and `WithRelocationDisabled` in `actor/spawn_option.go` |
-| child | never: the option is ignored | `PID.buildChildSettings` in `actor/pid.go` |
-| function actor | never | `actorSystem.SpawnNamedFromFunc` in `actor/spawn.go` |
-| router and its routees | never | `actorSystem.SpawnRouter` in `actor/spawn.go`; `router.spawnRoutees` in `actor/router.go` |
-| system actor | never: reserved names are skipped everywhere | `actorSystem.localActors` in `actor/actor_system.go` |
+| child ([Chapter 4, §4.6](chap-04.md#46-children)) | never: the option is ignored | `PID.buildChildSettings` in `actor/pid.go` |
+| function actor ([Chapter 4, §4.8](chap-04.md#48-function-actors)) | never | `actorSystem.SpawnNamedFromFunc` in `actor/spawn.go` |
+| router and its routees ([Chapter 11, §11.2](chap-11.md#112-routers)) | never | `actorSystem.SpawnRouter` in `actor/spawn.go`; `router.spawnRoutees` in `actor/router.go` |
+| system actor ([Chapter 3, §3.4](chap-03.md#34-the-guardian-tree)) | never: reserved names are skipped everywhere | `actorSystem.localActors` in `actor/actor_system.go` |
 | cluster singleton | yes, through the singleton path ([§21.10](#2110-inside-one-relocation)) | `recreateSingletonFromWire` in `actor/relocation_worker.go` |
 | reliable-delivery endpoint | like any actor; its controller never relocates, and a non-relocatable endpoint has its records withdrawn | [Chapter 23, §23.14](chap-23.md#2314-cluster-publication-relocation-and-placement) |
 
-The relocatable flag is a PID state bit (`PID.IsRelocatable` in `actor/pid.go`). It belongs to the actor alone: `WithoutRelocation` only sets the system's `relocationEnabled` flag and leaves the bit, and the registry record, saying "relocatable" ([§21.6](#216-what-every-node-does-on-nodeleft) has what that means after a departure). The flag travels in the actor's wire record with everything a respawn needs: kind, address, incarnation, passivation strategy, dependencies, stashing, role, supervisor, reentrancy, singleton spec, reliable-delivery and reliable-companion specs, and the init timeout only when it was an explicit override (`PID.toSerialize` in `actor/pid.go`). The per-actor settings most actors never set, the singleton spec and the role among them, live in a lazily allocated `pidCompanion` (`actor/pid_companion.go`).
+The relocatable flag is a PID state bit ([Chapter 4](chap-04.md); `PID.IsRelocatable` in `actor/pid.go`). It belongs to the actor alone: `WithoutRelocation` only sets the system's `relocationEnabled` flag and leaves the bit, and the registry record, saying "relocatable" ([§21.6](#216-what-every-node-does-on-nodeleft) has what that means after a departure). The flag travels in the actor's wire record with everything a respawn needs: kind, address, incarnation, passivation strategy, dependencies, stashing, role, dispatcher name, supervisor, reentrancy, singleton spec, reliable-delivery and reliable-companion specs, and the init timeout only when it was an explicit override (`PID.toSerialize` in `actor/pid.go`). The respawn reads the dispatcher name back with `WithDispatcher` (`actorSystem.wireSpawnOptions` in `actor/spawn.go`; [Chapter 7](chap-07.md#named-dispatchers)). The mailbox is not in the record. The per-actor settings most actors never set, the singleton spec and the role among them, live in a lazily allocated `pidCompanion` (`actor/pid_companion.go`).
 
 **A relocated actor is a new incarnation.** It is built by a fresh `Spawn` from its kind: `PreStart` runs again, nothing in its memory or its mailbox survives, and its PID carries a new incarnation ID ([§21.10](#2110-inside-one-relocation)).
 
@@ -112,7 +127,7 @@ A cluster singleton is a top-level actor of which the cluster runs one instance 
 
 Each attempt chooses the host:
 
-- **Without a role**, the cluster coordinator (`actorSystem.spawnSingletonOnLeader` in `actor/cluster_singleton.go`). It reads the members, finds the one marked `Coordinator`, fails with `ErrLeaderNotFound` when none is, spawns locally when the coordinator is this node, and otherwise sends a `RemoteSpawn` carrying the singleton spec and the supervisor.
+- **Without a role**, the cluster coordinator (`actorSystem.spawnSingletonOnLeader` in `actor/cluster_singleton.go`). It reads the members, finds the one marked `Coordinator` ([Chapter 20, §20.8](chap-20.md#208-peers-members-and-the-leader)), fails with `ErrLeaderNotFound` when none is, spawns locally when the coordinator is this node, and otherwise sends a `RemoteSpawn` carrying the singleton spec and the supervisor.
 - **With a role**, the oldest member advertising it, by creation time (`actorSystem.spawnSingletonWithRole` in `actor/spawn.go`). No such member is `errNoRoleMembers`, a retryable error. A remote host gets a `RemoteSpawn` with the spec, the role and the supervisor.
 
 The receiving node does not spawn blindly: `remoteSpawnHandler` calls its own `SpawnSingleton`, which chooses the host again from its own view (`actorSystem.remoteSpawnHandler` in `actor/remote_server.go`).
@@ -123,7 +138,7 @@ On the chosen host, `spawnSingletonOnLocal` (`actor/spawn.go`):
 2. Serialises on the name with `runSpawnActivation`, so concurrent calls on one node share one attempt ([Chapter 4, §4.2](chap-04.md#42-the-local-spawn-path-step-by-step)).
 3. Checks the registry with the plain `checkSpawnPreconditions`: a claim held by a departed node fails the check like a live one.
 4. Returns a running top-level actor that already holds the name; a holder that is not running refuses with `ErrActorAlreadyExists` (`nameResolver` in `actor/spawn.go`).
-5. Builds the PID long-lived, with the singleton spec, the role and the supervisor, and attaches it under the singleton manager, a system actor that only exists in cluster mode (`clusterSingletonManager` and `actorSystem.spawnSingletonManager` in `actor/cluster_singleton.go`). The record is written before the call returns.
+5. Builds the PID long-lived, with the singleton spec, the role and the supervisor, and attaches it under the singleton manager, a system actor ([Chapter 3, §3.4](chap-03.md#34-the-guardian-tree)) that only exists in cluster mode (`clusterSingletonManager` and `actorSystem.spawnSingletonManager` in `actor/cluster_singleton.go`). The record is written before the call returns.
 
 **Options.**
 
@@ -135,7 +150,7 @@ On the chosen host, `spawnSingletonOnLocal` (`actor/spawn.go`):
 | `WithSingletonSpawnRetries` | 5 | number of attempts; non-positive ignored | `WithSingletonSpawnRetries` in `actor/cluster_singleton_option.go` |
 | `WithSingletonSupervisor` | the default singleton supervisor | travels with a delegated spawn and with relocation; nil ignored | `WithSingletonSupervisor` in `actor/cluster_singleton_option.go` |
 
-The default singleton supervisor stops the actor on a panic, an internal error or a nil panic, one-for-one; the system's default supervisor does not apply. Its comment gives the reason: the singleton lifecycle stays "in the hands of the relocation machinery rather than a local restart loop" (`defaultSingletonSupervisor` in `actor/spawn.go`). A singleton that stops this way is not re-created: nothing but a node departure ever calls the singleton path again ([§21.10](#2110-inside-one-relocation)).
+The default singleton supervisor ([Chapter 9](chap-09.md#91-the-supervisor-value)) stops the actor on a panic, an internal error or a nil panic, one-for-one; the system's default supervisor does not apply. Its comment gives the reason: the singleton lifecycle stays "in the hands of the relocation machinery rather than a local restart loop" (`defaultSingletonSupervisor` in `actor/spawn.go`). A singleton that stops this way is not re-created by the actor system: the singleton path runs again only on a later `SpawnSingleton` call (the delegated `RemoteSpawn` handler included) or in a relocation after a node departure ([§21.10](#2110-inside-one-relocation)).
 
 ## 21.5 Singleton races, crashes and leadership
 
@@ -170,9 +185,9 @@ A successful run that produced no PID resolves one with `resolveExistingSingleto
 
 ## 21.6 What every node does on `NodeLeft`
 
-Membership events reach the actor system through its cluster events loop, one goroutine ([Chapter 20](chap-20.md)). `handleClusterEvent` ignores events while the system stops or is out of the cluster, publishes `NodeLeft` on the event stream, and calls `handleNodeLeftEvent` (`actor/actor_system.go`). In order:
+Membership events reach the actor system through its cluster events loop, one goroutine ([Chapter 20, §20.9](chap-20.md#209-cluster-events)). `handleClusterEvent` ignores events while the system stops or is out of the cluster, publishes `NodeLeft` on the event stream ([Chapter 11, §11.3](chap-11.md#113-the-event-stream)), and calls `handleNodeLeftEvent` (`actor/actor_system.go`). When the departed node's remoting port is cached, the handler first closes the remoting connections to that endpoint. In order:
 
-1. Prune the remote watches pointing at the departed node: local watchers of its actors receive a `Terminated` stamped with the departure time (`actorSystem.pruneRemoteWatchesForNode` in `actor/actor_system.go`).
+1. Prune the remote watches pointing at the departed node: local watchers of its actors receive a `Terminated` ([Chapter 9, §9.9](chap-09.md#99-remote-watch)) stamped with the departure time (`actorSystem.pruneRemoteWatchesForNode` in `actor/actor_system.go`).
 2. Repair the registry if needed (below). This runs synchronously on the events loop.
 3. Trigger data-center reconciliation ([Chapter 22](chap-22.md)).
 4. Stop here when relocation is disabled.
@@ -188,7 +203,7 @@ The cached remoting port of the departed node is forgotten when the handler retu
 **Registry repair.** `resyncAfterClusterEvent` re-puts this node's own live actors and grains, so registry entries whose partitions were lost with the departed node come back (`actor/actor_system.go`):
 
 - with a replica count of 1, on every departure;
-- with more, only once `replicaCount` distinct nodes have departed within the correlated-departure window, because Olric tolerates at most `replicaCount-1` simultaneous losses; otherwise Olric promotes the backups itself.
+- with more, only once `replicaCount` distinct nodes have departed within the correlated-departure window, because Olric tolerates at most `replicaCount-1` simultaneous losses ([Chapter 20, §20.2](chap-20.md#202-configuration)); otherwise Olric promotes the backups itself.
 
 The window is `correlatedDepartureWindow`, two minutes, widened to twice the cluster state sync interval when that is longer (`NewActorSystem` in `actor/actor_system.go`); departures are counted in the `recentDepartures` TTL map (`actorSystem.recordDeparture` in `actor/actor_system.go`), and only when the replica count is above 1. The comment on `correlatedDepartureWindow` explains the bias: a window too long costs redundant, idempotent re-puts, one too short can lose entries of actors alive on survivors. The re-put of an actor whose name another incarnation now owns is skipped; any other failure ends the actor pass, logged (`actorSystem.resyncActors` in `actor/actor_system.go`). Repair does not touch the departed node's own actors; relocation does.
 
@@ -220,7 +235,7 @@ At the end the goroutine forgets the cached port, unless the node rejoined (`act
 **The derivation** (`actorSystem.deriveRelocationSetFromRegistry` in `actor/actor_system.go`):
 
 1. Resolve the remoting port from the cache; without it, fail.
-2. Scan the registry for the actors and the grains of that host and port (`ActorsByHost` and `GrainsByHost`), with a budget of the configured cluster read timeout or one minute, whichever is longer: the comment on `relocationDeriveScanTimeout` in `actor/relocation_worker.go` says a lookup-sized timeout cannot scan thousands of records, and a timed-out scan abandons the rebalance, losing every actor of the node.
+2. Scan the registry ([Chapter 20, §20.6](chap-20.md#206-claims-fences-and-scans)) for the actors and the grains of that host and port (`ActorsByHost` and `GrainsByHost`), with a budget of the configured cluster read timeout or one minute, whichever is longer: the comment on `relocationDeriveScanTimeout` in `actor/relocation_worker.go` says a lookup-sized timeout cannot scan thousands of records, and a timed-out scan abandons the rebalance, losing every actor of the node.
 3. Skip reserved names.
 4. Keep relocatable actors and non-relocatable reliable endpoints, keyed by name. For any other actor, record a claim to release, except for a singleton or a record without an incarnation ID, which cannot be fenced.
 5. Keep every grain, keyed by identity; the worker sorts them by their flags.
@@ -264,7 +279,7 @@ A node that stops gracefully hands its relocation set to its peers before it lea
 4. **Withdraw** this node's registry records (`actorSystem.cleanupCluster` in `actor/actor_system.go`), for every non-system actor listed when the shutdown began: each removal is fenced by the actor's incarnation, so a record another incarnation owns stays; a reliable endpoint's controller record is removed with it; and each grain record is released while it still names this node. The removals run in parallel under one `errgroup` whose context the first failure cancels, so one failed removal can cut the others short. Failures are logged, never returned: a leftover record names a node that is leaving, and lookups and spawns already cope with such records (comment on `shutdownCluster`).
 5. **Leave** the membership (`cluster.Stop`), then close the local store.
 
-A peer stores the snapshot in its own local store, a BoltDB file (`actorSystem.persistPeerStateHandler` in `actor/remote_server.go`; `NewBoltStore` in `internal/cluster/boltdb_store.go`), not in the registry; a peer whose remoting or clustering is already off refuses it with `ErrRemotingDisabled` or `ErrClusterDisabled`, and so does a peer whose `Stop` cleared the store while the request was in flight. The records are normally withdrawn before the node leaves, so the relocation that follows finds no record to release and respawns directly ([§21.10](#2110-inside-one-relocation)).
+A peer stores the snapshot in its own local store ([Chapter 20, §20.12](chap-20.md#2012-the-peer-state-store)), a BoltDB file (`actorSystem.persistPeerStateHandler` in `actor/remote_server.go`; `NewBoltStore` in `internal/cluster/boltdb_store.go`), not in the registry; a peer whose remoting or clustering is already off refuses it with `ErrRemotingDisabled` or `ErrClusterDisabled`, and so does a peer whose `Stop` cleared the store while the request was in flight. The records are normally withdrawn before the node leaves, so the relocation that follows finds no record to release and respawns directly ([§21.10](#2110-inside-one-relocation)).
 
 On `NodeLeft` the leader reads **its own store** (`actorSystem.handleNodeLeftEvent` in `actor/actor_system.go`):
 
@@ -281,14 +296,14 @@ The snapshot stays in the store while the relocation runs; the worker deletes it
 
 **One job per departed address.** `beginRelocation` registers a job in `relocationJobs`, keyed by the departed peers address and holding the snapshot, and refuses a second one while it is in flight; `endRelocation` releases it (`actor/actor_system.go`). A duplicate `NodeLeft` is ignored, and an address that departs again after its relocation completed is relocated again. A failed tell to the relocator releases the job at once. Shutdown drops every job (`actorSystem.shutdownCluster` in `actor/actor_system.go`).
 
-**The relocator** is a long-lived system actor under the system guardian, spawned only with clustering and relocation both enabled (`actorSystem.spawnRelocator` in `actor/actor_system.go`). Its mailbox is the queue of departures, "so a burst of node departures never blocks the cluster events loop". It restarts on a panic or a rebalancing error and resumes on an internal or spawn error.
+**The relocator** is a long-lived system actor under the system guardian ([Chapter 3, §3.4](chap-03.md#34-the-guardian-tree)), spawned only with clustering and relocation both enabled (`actorSystem.spawnRelocator` in `actor/actor_system.go`). Its mailbox is the queue of departures, "so a burst of node departures never blocks the cluster events loop". It restarts on a panic or a rebalancing error and resumes on an internal or spawn error.
 
 On `Rebalance`, `relocator.startWorker` (`actor/relocator.go`):
 
 1. Names a worker `GoAktRelocationWorker-<n>` from a sequence, so a re-departed address gets a new name.
 2. Spawns it as a long-lived system child whose supervisor stops it on a panic rather than restarting it. The comment explains: the `Rebalance` it was processing is gone with its mailbox, so a restarted worker would sit idle while the job blocks every retry for that address.
 3. On spawn failure, aborts the relocation.
-4. Watches it, records the job it owns, and tells it `Rebalance`.
+4. Watches it ([Chapter 9, §9.8](chap-09.md#98-death-watch)), records the job it owns, and tells it `Rebalance`.
 
 There is no per-address check here: `beginRelocation` already gates dispatch, so every `Rebalance` is a new job.
 
@@ -300,7 +315,7 @@ There is no per-address check here: `beginRelocation` already gates dispatch, so
 - an eager grain is a failure, unless it is also relocation-disabled;
 - a lazy or relocation-disabled grain has its registry entry released, within a 30 s budget shared by all of them, and is a failure only when that release fails.
 
-It publishes one `RelocationFailed` and records the metrics.
+It publishes one `RelocationFailed` ([Chapter 11, §11.3](chap-11.md#113-the-event-stream)) and records the metrics ([Chapter 12, §12.4](chap-12.md#124-opentelemetry-instruments)).
 
 ```mermaid
 sequenceDiagram
@@ -335,7 +350,7 @@ sequenceDiagram
 10. Wait, compute relocated as handled minus failed, record the metrics, and publish one `RelocationFailed` listing exactly the failed actors and grains, if any.
 11. `relocationWorker.finish`: delete the snapshot and release the job.
 
-**A peer's share.** `buildRelocateBatchRequests` cuts a share into requests of at most 500 actors, then requests of at most 500 grains (`defaultRelocationBatchSize`), "so a batch stays far below the transport's max frame size". `relocationWorker.sendBatches` sends them in order; each request gets two attempts with a 100 ms to 1 s backoff, and each attempt is bounded by 30 s, because the relocation context carries no deadline of its own and a black-holed target would otherwise stall the whole rebalance (`relocationBatchSendTimeout` in `actor/relocation_worker.go`). Per-item failures reported by the peer are merged.
+**A peer's share.** `buildRelocateBatchRequests` cuts a share into requests of at most 500 actors, then requests of at most 500 grains (`defaultRelocationBatchSize`), "so a batch stays far below the transport's max frame size". `relocationWorker.sendBatches` sends them in order; each request ([Chapter 16](chap-16.md) covers the client call) gets two attempts with a 100 ms to 1 s backoff, and each attempt is bounded by 30 s, because the relocation context carries no deadline of its own and a black-holed target would otherwise stall the whole rebalance (`relocationBatchSendTimeout` in `actor/relocation_worker.go`). Per-item failures reported by the peer are merged.
 
 **An unreachable peer.** `relocationWorker.sendBatches` stops at the first batch that fails both attempts and returns it with every batch after it; the batches the peer accepted before stay done, their per-item failures merged. `relocationWorker.relocateShare` redistributes that unsent remainder:
 
@@ -345,7 +360,7 @@ sequenceDiagram
 | eager grain with a role | the remaining survivor with the role that has been handed the fewest grains so far; else the leader if eligible; else a failure |
 | other grain | round-robin over the remaining survivors, or the leader when none is left |
 
-The leader's part is recreated locally. Each survivor's part is sent once; if that fails too, its actors and eager grains are failures (`recordUnsent`) and its lazy grains are released from the leader (`relocationWorker.releaseUndeliverableLazyGrains`).
+The leader's part is recreated locally. Each survivor's part is sent in one pass, with the same two attempts per request and no further redistribution; if that fails too, its actors and eager grains are failures (`recordUnsent`) and its lazy grains are released from the leader (`relocationWorker.releaseUndeliverableLazyGrains`).
 
 **On the peer.** `relocateBatchHandler` refuses the batch when remoting or clustering is off, applies the propagated context and deadline, runs the same `enqueueRelocation` as the leader under a limit of ten, and answers with the per-item failures (`actor/remote_server.go`). Leader and peers share one dispatch rule, so they "cannot drift".
 
@@ -368,7 +383,7 @@ The leader's part is recreated locally. Each survivor's part is sent once; if th
 
 ## 21.11 Grain relocation
 
-Grains are covered in Chapters [13](chap-13.md) and [14](chap-14.md); on departure, each grain follows its own flags:
+Grains are covered in Chapters [13](chap-13.md) and [14](chap-14.md) ([Chapter 13, §13.7](chap-13.md#137-when-the-recorded-owner-is-gone) has what a lookup does when the recorded owner is gone); on departure, each grain follows its own flags:
 
 | Grain | On departure | Source |
 |---|---|---|
@@ -376,11 +391,11 @@ Grains are covered in Chapters [13](chap-13.md) and [14](chap-14.md); on departu
 | `WithGrainEagerRelocation` | reactivated at once on its target, after its entry is released; an entry naming another node means it is already active there | `actorSystem.recreateGrainFromWire` in `actor/grain_engine.go` |
 | `WithGrainDisableRelocation` | never recreated; its entry is released by the leader so the next message activates it afresh | `relocatableGrains` in `actor/relocation_worker.go` |
 
-`WithGrainEagerRelocation` and `WithGrainDisableRelocation` are mutually exclusive: configuring both fails validation with `ErrGrainRelocationConflict` (`WithGrainEagerRelocation` in `actor/grain_option.go`). Only an eager grain is constrained by its `WithActivationRole`: a lazy grain's relocation is a release any node can perform, and its next activation applies whatever options its caller supplies (`grainPlacementRole` in `actor/relocation_worker.go`). Releases go through `cluster.ReleaseGrain`, which deletes the record only while it names the given node (`internal/cluster/cluster.go`). A lazy grain counts as relocated unless its release fails.
+`WithGrainEagerRelocation` and `WithGrainDisableRelocation` are mutually exclusive: configuring both fails validation with `ErrGrainRelocationConflict` (`grainConfig.Validate` in `actor/grain_option.go`). Only an eager grain is constrained by its `WithActivationRole`: a lazy grain's relocation is a release any node can perform, and its next activation applies whatever options its caller supplies (`grainPlacementRole` in `actor/relocation_worker.go`). Releases go through `cluster.ReleaseGrain`, which deletes the record only while it names the given node (`internal/cluster/cluster.go`). A lazy grain counts as relocated unless its release fails.
 
 ## 21.12 The handoff window
 
-While a relocation runs, a name can still resolve to the departed node, or briefly to nothing between the removal of its record and the respawn. The handoff window hides that from name-based sends. It opens only on `NodeLeft`: after a graceful leave the records are withdrawn before the node leaves the membership ([§21.8](#218-graceful-leave-the-peer-state-snapshot)), and a send in that interval meets a not-found that is masked only if another departure's window happens to be open.
+While a relocation runs, a name can still resolve to the departed node, or briefly to nothing between the removal of its record and the respawn. The handoff window hides that from name-based sends ([Chapter 5, §5.8](chap-05.md#58-sending-by-name)). It opens only on `NodeLeft`: after a graceful leave the records are withdrawn before the node leaves the membership ([§21.8](#218-graceful-leave-the-peer-state-snapshot)), and a send in that interval meets a not-found that is masked only if another departure's window happens to be open.
 
 **The window.** `relocatingEndpoints` is a TTL map of remoting endpoints with a TTL of `relocationHandoffWindow`, three seconds (`NewActorSystem` in `actor/actor_system.go`). On `NodeLeft`, every node with relocation enabled adds the departed endpoint, using the cached remoting port; with no cached port it adds nothing (`actorSystem.markEndpointRelocating` in `actor/relocation_handoff.go`). A `NodeJoined` at the same peers address deletes it early, so a node that restarted in place is not stalled (`actorSystem.markEndpointRecovered` in `actor/relocation_handoff.go`). `relocationInFlight` asks the map for its **active** entries, not its length: entries are only evicted on a write, and a length check would read true forever after the first departure (comment on `actorSystem.relocationInFlight`).
 
@@ -393,11 +408,11 @@ While a relocation runs, a name can still resolve to the departed node, or brief
 | a retryable error while some window is active | wait and resolve again | 500 ms from the first such error, or the caller's timeout when shorter (`relocationNotFoundMaskWindow`) | that error |
 | anything else | fail at once | none | that error |
 
-Retryable errors are `ErrActorNotFound`, `ErrAddressNotFound`, `ErrRemoteSendFailure`, `ErrRequestTimeout`, `ErrRelocationInProgress`, a deadline, a refused connection and a network timeout (`isHandoffRetryable` in `actor/relocation_handoff.go`). Waits start at 50 ms and double up to 300 ms, never past the bound (`sleepWithinHandoff`). The short not-found bound keeps a name that never existed fast to fail during someone else's relocation. The caller's timeout covers the masking and the delivery together, so a masked `SendSync` with a two-second timeout does not block for four. The first wait of a send counts once in `actorsystem.relocation.buffered.count` (`actorSystem.recordRelocationHandoff` in `actor/actor_system.go`).
+Retryable errors are `ErrActorNotFound`, `ErrAddressNotFound`, `ErrRemoteSendFailure`, `ErrRequestTimeout`, `ErrRelocationInProgress`, a deadline, a refused connection and a network timeout (`isHandoffRetryable` in `actor/relocation_handoff.go`). Waits start at 50 ms and double up to 300 ms, never past the bound (`sleepWithinHandoff`). The short not-found bound keeps a name that never existed fast to fail during someone else's relocation. The caller's timeout covers the masking and the delivery together, so a masked `SendSync` with a two-second timeout does not block for four. The first wait of a send counts once in `actorsystem.relocation.buffered.count` ([Chapter 12, §12.4](chap-12.md#124-opentelemetry-instruments); `actorSystem.recordRelocationHandoff` in `actor/actor_system.go`).
 
-**`SendAsync`** uses `PID.deliverBypassingHandoff` (`actor/relocation_handoff.go`): one resolution, and a remote PID on an endpoint in its window fails at once with **`ErrRelocationInProgress`**, "a retryable signal" rather than a connection error. It never sleeps, because it also backs `ReceiveContext.SendAsync` inside actor turns (`PID.SendAsync` in `actor/pid.go`). Both send paths then fall back to other data centers on `ErrActorNotFound` ([Chapter 5, §5.8](chap-05.md#58-sending-by-name)).
+**`SendAsync`** uses `PID.deliverBypassingHandoff` (`actor/relocation_handoff.go`): one resolution, and a remote PID on an endpoint in its window fails at once with **`ErrRelocationInProgress`**, "a retryable signal" rather than a connection error. It never sleeps, because it also backs `ReceiveContext.SendAsync` inside actor turns (`PID.SendAsync` in `actor/pid.go`). Both send paths then fall back to other data centers on `ErrActorNotFound` ([Chapter 22, §22.10](chap-22.md#2210-cross-datacenter-operations)).
 
-The window applies only to these two by-name sends. `Tell` and `Ask` on a PID already held are not masked.
+The window applies only to these two by-name sends. `Tell` and `Ask` on a PID already held ([Chapter 5, §5.1](chap-05.md#51-three-ways-to-send)) are not masked.
 
 ## 21.13 Restart in place
 
@@ -413,7 +428,7 @@ The scan reads the actor's relocatable bit from its record and does not consult 
 | Statement | Enforced by |
 |---|---|
 | Two nodes spawning one name at once, both past the registry check: exactly one succeeds, the other gets `ErrActorAlreadyExists` and leaves no actor, a third node resolves the winner, and every node reports the name as existing | `TestSpawn` in `actor/spawn_test.go` |
-| `SpawnOn` with `LeastLoad` places the actor on the least-loaded node; with a role no member advertises it fails; a failed round-robin increment fails it | `TestSpawn` in `actor/spawn_test.go` |
+| `SpawnOn` with `LeastLoad` places the actor on the least-loaded node; with a role no member advertises it fails; a failed round-robin increment fails it; the remote request carries the dispatcher name | `TestSpawn` in `actor/spawn_test.go` |
 | An actor placed by `SpawnOn` with `Local` placement is resolvable and reachable from another node as soon as `SpawnOn` returns | `TestSpawnOnImmediateCrossNodeVisibility` in `actor/spawn_test.go` |
 | `SpawnOn` with `HashBased` places every actor on its partition owner from any caller, spawns here without a remote call when this node is the owner, fails when the owner lacks the role, and leaves exactly one actor, on the owner, when three nodes spawn one name at once | `TestSpawnOnHashBased` in `actor/spawn_test.go` |
 | Fifteen concurrent `SpawnSingleton` calls from three nodes all succeed, return one address, and leave exactly one live instance | `TestConcurrentSpawnSingletonSingleInstance` in `actor/cluster_singleton_test.go` |
@@ -445,7 +460,7 @@ The scan reads the actor's relocatable bit from its record and does not consult 
 | Snapshot replication returns at quorum, accepts partial success, and moves to younger peers only when the oldest are leaving | `TestPersistPeerStateToPeers` in `actor/actor_system_test.go` |
 | `SendSync` waits for a target on a departing endpoint to re-register, masks not-found only while a relocation is in flight, returns `ErrRelocationInProgress` when the window closes, and keeps within the caller's timeout | `TestDeliverAcrossHandoff` in `actor/relocation_handoff_test.go` |
 | `SendAsync` fails at once with `ErrRelocationInProgress` on a departing endpoint, without sleeping | `TestDeliverBypassingHandoff` in `actor/relocation_handoff_test.go` |
-| The window is opened for the cached remoting endpoint and closed when the node rejoins | `TestRelocatingEndpointTracking` in `actor/relocation_handoff_test.go` |
+| The window is opened for the cached remoting endpoint and closed by `markEndpointRecovered`, which a `NodeJoined` calls | `TestRelocatingEndpointTracking` in `actor/relocation_handoff_test.go` |
 | On restart in place, relocatable actors of the previous incarnation are respawned and singleton records removed | `TestCleanupStaleLocalActors` in `actor/actor_system_test.go` |
 
 ## Implementation details (may change)
@@ -471,14 +486,14 @@ The scan reads the actor's relocatable bit from its record and does not consult 
 | A custom mailbox is lost by remote placement and by relocation | `WithMailbox` in `actor/spawn_option.go` |
 | Children, function actors and routers never relocate, whatever their options | `PID.buildChildSettings` in `actor/pid.go`; `actorSystem.SpawnNamedFromFunc` and `actorSystem.SpawnRouter` in `actor/spawn.go` |
 | A relocated actor starts from scratch: `PreStart` again, empty state, empty mailbox, new incarnation | `actorSystem.recreateActorFromWire` in `actor/spawn.go` |
-| A singleton that stops while its host stays in the cluster is not re-created; a coordinator change does not move it | `defaultSingletonSupervisor` in `actor/spawn.go`; `actorSystem.handleClusterEvent` in `actor/actor_system.go` |
+| A singleton that stops while its host stays in the cluster is not re-created by the actor system; a coordinator change does not move it | `defaultSingletonSupervisor` in `actor/spawn.go`; `actorSystem.handleClusterEvent` in `actor/actor_system.go` |
 | A singleton claim is never written over by a spawn, even when its node is gone | `actorSystem.departedClaim` in `actor/actor_system.go` |
 | After a crash, a non-relocatable actor reads as not found at once; one with the relocatable bit, or a singleton, keeps resolving to the dead node until it is recreated, which under `WithoutRelocation` never happens | `actorSystem.getActorRecord` in `actor/actor_system.go` |
 | With `WithoutRelocation`, a departure opens no handoff window, reads no snapshot, starts no crash recovery and releases no claim; a crashed node's non-singleton names are still reusable through `departedClaim`, its singleton names are not | `actorSystem.handleNodeLeftEvent` and `actorSystem.departedClaim` in `actor/actor_system.go` |
 | `SpawnSingleton` for a name whose record still names a crashed host succeeds and returns a remote PID on the dead node | `actorSystem.handleSingletonNameConflict` in `actor/spawn.go` |
 | At a graceful leave, one failed registry removal cancels the context of the removals still running | `actorSystem.cleanupCluster` in `actor/actor_system.go` |
 | A failed snapshot hand-off, or an actor that cannot be serialised, makes `Stop` return an error, but the node still stops | `actorSystem.shutdown` and `actorSystem.shutdownCluster` in `actor/actor_system.go` |
-| Crash recovery cannot start before three quiet seconds and can wait 30 s or more | `actorSystem.awaitRelocationQuiescence` in `actor/actor_system.go` |
+| Crash recovery starts once three seconds have passed since the last Olric rebalance event, and proceeds anyway after waiting 30 s | `actorSystem.awaitRelocationQuiescence` in `actor/actor_system.go` |
 | Only the leader's own store counts for the snapshot; the other nodes delete their copies on `NodeLeft` | `actorSystem.handleNodeLeftEvent` in `actor/actor_system.go` |
 | A crash of a node this leader never saw alive is not recovered: there is no cached port to scan for | `actorSystem.deriveRelocationSetFromRegistry` in `actor/actor_system.go` |
 | `RelocationStarted` with `BestEffort` true is published even for an empty set | `actorSystem.gateCrashRecovery` in `actor/actor_system.go` |

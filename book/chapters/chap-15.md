@@ -28,38 +28,40 @@
   - [Configuration](#configuration)
   - [Invariants to preserve](#invariants-to-preserve)
   - [Where things live](#where-things-live)
-  - [Deferred work](#deferred-work)
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
 
 ## What you will learn
 
-- Why the unary engine was replaced, and what each part of the duplex protocol answers.
+- What the legacy path does that the duplex protocol answers, and what each part of the duplex protocol provides.
 - Where the line runs between the protocol (`duplexConn`) and the transport (`FramedConn`), and what a lane is.
 - The 16-byte frame header, the ten frame types, the HELLO negotiation and the envelope layouts.
-- How a frame is correlated, dispatched, chunked, compressed by reference tables and released back to a pool.
+- How a frame is correlated, dispatched, chunked, compressed by reference tables and released back to a pool ([Chapter 16](chap-16.md) is the sending side, [Chapter 17](chap-17.md) the receiving side).
 - The two byte counters of flow control, and when the receiver gives credit back.
 - How a node speaks both the duplex and the legacy protocol during a rolling upgrade, and what the legacy frames look like.
-- What remoting promises on failure: at-most-once, per-pair FIFO, backpressure instead of drops.
+- What remoting promises on failure: at-most-once, per-pair FIFO, backpressure instead of drops ([Chapter 5, §5.4](chap-05.md#54-dead-letters) for the dead letters it produces).
 
 ## 15.1 What remoting is
 
-Remoting is a persistent, duplex, correlation-driven protocol over TCP. A node keeps a few long-lived connections to each peer, called lanes. Every connection carries frames in both directions, and many requests are in flight on it at once. An older protocol, one protobuf request and one response per socket exchange, is still in the code for mixed-version clusters ([§15.9](#159-compatibility-two-protocols-on-one-port)).
+Remoting is a persistent, duplex, correlation-driven protocol over TCP. A node keeps a few long-lived connections to each peer, called lanes. Every connection carries frames in both directions, and many requests are in flight on it at once. The client side is [Chapter 16](chap-16.md) and the server side [Chapter 17](chap-17.md). An older protocol, one protobuf request and one response per socket exchange, is still in the code for mixed-version clusters ([§15.9](#159-compatibility-two-protocols-on-one-port)).
 
-**Goals:**
+**What the duplex protocol provides:**
 
-1. Remove head-of-line blocking in socket use, server dispatch and outbound batching.
-2. Carry messages above the legacy 16 MiB frame ceiling without starving small messages.
-3. Cut copies on the default protobuf path and avoid per-message envelope allocations where possible.
-4. Replace heuristic wire detection with a versioned, negotiated protocol.
-5. Replace silent overload drops with bounded, credit-based backpressure.
+| Property | Where |
+|---|---|
+| No socket held for a whole exchange; independent lanes for control, ordinary and large traffic | [§15.3](#153-architecture) |
+| A read loop that parses and hands off; replies come from a worker pool | [§15.5](#155-correlation-and-dispatch) |
+| Messages above the legacy 16 MiB frame ceiling, chunked without starving small messages | [§15.6](#156-large-messages) |
+| Addresses and type names sent once per connection and referenced afterwards | [§15.7](#157-reference-tables-and-buffers) |
+| A versioned, negotiated protocol (revision, limits, compression codec) | [§15.4](#154-the-wire-protocol) |
+| Bounded, credit-based backpressure | [§15.8](#158-flow-control) |
 
 **Non-goals:**
 
-- Delivery stays **at-most-once**. Reliable delivery is a protocol above remoting.
-- The public actor API (`Tell`, `Ask`, `RemoteTell`, `RemoteAsk` and the batch variants) and the public `remote.Serializer` contract do not change.
-- Cluster membership and the distributed registry use their own transports. They are not remoting traffic.
+- Delivery stays **at-most-once**. Reliable delivery is a protocol above remoting ([Chapter 23](chap-23.md)).
+- The public actor API (`Tell`, `Ask`, `RemoteTell`, `RemoteAsk` and the batch variants, [Chapter 5](chap-05.md)) and the public `remote.Serializer` contract ([Chapter 17, §17.2](chap-17.md#172-serializers)) do not change.
+- Cluster membership and the distributed registry use their own transports ([Chapter 19](chap-19.md), [Chapter 20](chap-20.md)). They are not remoting traffic.
 - User payload formats are unchanged. The envelope is not a public serialization format.
 
 **Capability revisions.** The protocol grew in five cumulative steps, and a connection runs at the lower of the two peers' revisions (`negotiateHello` in `internal/net/handshake.go`):
@@ -72,26 +74,24 @@ Remoting is a persistent, duplex, correlation-driven protocol over TCP. A node k
 | 4 | `CapabilityRevisionCredits` | `CREDIT` frames, receiver-granted send window |
 | 5 | `CapabilityRevisionTellBatch` | Coalesced tell batches with table references (`TellBatchTypeName`) |
 
-The dialer (`peer.dialLane` in `internal/remoteclient/peer.go`) advertises revision 5. The acceptor (`RemotingServer.handleDuplexConn` in `internal/net/remoting_server.go`) advertises revision 5 when a batch handler is registered (`WithRemotingServerDuplexTellBatchHandler`, which the actor system always sets) and revision 4 otherwise, so a peer never sends a batch the server cannot deliver (`RemotingServer.revision`). There is no QUIC transport; TCP is the only implementation.
+The dialer (`peer.dialLane` in `internal/remoteclient/peer.go`) advertises revision 5. The acceptor (`RemotingServer.handleDuplexConn` in `internal/net/remoting_server.go`) advertises revision 5 when a batch handler is registered (`WithRemotingServerDuplexTellBatchHandler`, which the actor system always sets, [Chapter 17, §17.4](chap-17.md#174-the-server)) and revision 4 otherwise, so a peer never sends a batch the server cannot deliver (`RemotingServer.revision`). TCP is the only transport implementation.
 
-Two packages named in the remoting area are not part of the transport: `internal/chunk` splits a slice into batches for the relocation worker, and `internal/codec` converts spawn options, supervisors and similar values to and from protobuf. Neither touches frames.
+Two packages named in the remoting area are not part of the transport: `internal/chunk` splits a slice into batches for the relocation worker ([Chapter 21, §21.9](chap-21.md#219-the-relocator-and-its-workers)), and `internal/codec` converts dependencies, passivation strategies, supervisors and similar values to and from protobuf ([Chapter 17, §17.10](chap-17.md#1710-internalcodec)). Neither touches frames.
 
 ## 15.2 Why the engine changed
 
-The legacy engine was a length-prefixed, unary protobuf-over-TCP protocol. A caller took a socket from a pool, wrote a request, read the response, and returned the socket. Each limitation of that design has one answer in the duplex protocol:
+The legacy path is a length-prefixed, unary protobuf-over-TCP protocol, and it is still in the code ([§15.9](#159-compatibility-two-protocols-on-one-port)). Each of its properties below has an answer in the duplex protocol:
 
-| Legacy limitation | Design response |
+| Legacy path | Duplex answer |
 |---|---|
-| A socket was held for a whole request/response exchange | Long-lived duplex connections with correlation IDs |
-| Server handlers ran inline on the read loop | A read loop that parses and hands off; work that needs a reply goes to a worker pool |
-| One coalescer writer serialised all traffic to a destination | Per-connection writer batching and independent lanes |
-| A frame above 16 MiB closed the connection | Chunking with bounded reassembly and in-band errors |
-| Addresses and type names were repeated in every message | Per-connection `TABLE` frames and varint references |
-| Compression had to be configured identically by hand on both sides | HELLO negotiation before the compression wrapper is applied |
-| A full queue dropped batches silently | Byte-bounded admission plus receiver-granted credits |
-| Write and read-idle settings had no effect | Write deadlines and per-lane PING/PONG liveness |
+| A caller takes a socket from a pool, writes a request, reads the response and returns the socket (`Client.Get`, `Client.SendProtoWithMetadata` in `internal/net/client.go`) | Long-lived duplex connections with correlation IDs |
+| The server runs the handler inline in the connection's loop (`RemotingServer.handleConn`) | A read loop that parses and hands off; work that needs a reply goes to a worker pool |
+| A frame above `MaxFrameSize` closes the connection | Chunking with bounded reassembly and in-band errors |
+| Every message repeats its type name, and every `RemoteMessage` its sender and receiver addresses | Per-connection `TABLE` frames and varint references |
+| Compression is configured by hand on both sides, with no negotiation | HELLO negotiation before the compression wrapper is applied |
+| Only `IdleTimeout` applies: it sets the read and write deadlines. `WriteTimeout` and `ReadIdleTimeout` are not consulted | Write deadlines and per-lane PING/PONG liveness |
 
-The revisions build on one another. Revision 1 carries the frame header, the negotiated session, the correlation table, the dispatch split and the fallback to the legacy protocol; lanes, which isolate system traffic, are declared in every `HELLO` whatever the revision. Revision 2 adds chunking, which separates message size from frame size, revision 3 adds tables, which remove repeated identities from the envelopes, revision 4 adds credits, and revision 5 extends the tables to the messages of a coalesced tell batch. Buffer ownership does not depend on the revision. The maintainer keeps these two apart on purpose: ownership controls how long a buffer lives; credits control what the network may deliver and how much memory a peer must hold.
+Buffer ownership ([§15.7](#buffer-ownership)) does not depend on the negotiated revision.
 
 ## 15.3 Architecture
 
@@ -113,9 +113,9 @@ type FramedConn interface {
 }
 ```
 
-The transport moves whole frames and owns the socket (`internal/net/transport.go`). `TCPTransport` and `tcpFramedConn` are the only implementation. Everything else is protocol and lives in `duplexConn` (`internal/net/duplex.go`): the handshake result, lane checks, correlation, chunking, tables and credits. `duplexConn` is exposed as the `DuplexSession` interface (`internal/net/duplex_open.go`). The boundary was drawn so that another transport could map lanes to streams without changing frames, envelopes, correlation or flow control.
+The transport moves whole frames and owns the socket (`internal/net/transport.go`). `TCPTransport` and `tcpFramedConn` are the only implementation. Everything else is protocol and lives in `duplexConn` (`internal/net/duplex.go`): the handshake result, lane checks, correlation, chunking, tables and credits. `duplexConn` is exposed as the `DuplexSession` interface (`internal/net/duplex_open.go`). On the client, `remotingTransport.Dial` upgrades the socket with TLS before the HELLO exchange; on the server, `TCPServer.serveConn` applies TLS before it looks at the first byte ([Chapter 18, §18.2](chap-18.md#182-where-tls-is-applied)).
 
-The boundary is not perfectly clean. `duplexConn` reaches through `NetConn` to set read and write deadlines, and it uses optional methods of `tcpFramedConn` by type assertion: `BufferedReadBytes`, `AbandonPendingRead` and `releaseReadPayload`. The dial path does the same for `ReplaceNetConn` and `EnableReadBuffering` (`OpenDuplex` in `internal/net/duplex_open.go`), and `RemotingServer.handleDuplexConn` calls them directly on its `*tcpFramedConn`.
+`duplexConn` also reaches through `NetConn` to set read and write deadlines, and it uses optional methods of `tcpFramedConn` by type assertion: `BufferedReadBytes`, `AbandonPendingRead` and `releaseReadPayload`. The dial path does the same for `ReplaceNetConn` and `EnableReadBuffering` (`OpenDuplex` in `internal/net/duplex_open.go`), and `RemotingServer.handleDuplexConn` calls them directly on its `*tcpFramedConn`.
 
 ### Lanes
 
@@ -126,18 +126,18 @@ flowchart LR
     end
 
     subgraph nodeB["node B (acceptor)"]
-        h0["handleDuplexConn (lane 0x00)"]
-        h1["handleDuplexConn (lane 0x01..N)"]
-        hf["handleDuplexConn (lane 0xFF)"]
-        rl["read loop"]
-        mb["mailbox"]
-        wp["worker pool"]
-        rep["REPLY"]
-        h0 --> rl
-        h1 --> rl
-        hf --> rl
-        rl -->|"tell"| mb
-        rl -->|"ask"| wp
+        h0["control lane 0x00: duplexConn"]
+        h1["ordinary lanes 0x01 to 0xFE: one duplexConn each"]
+        hf["large lane 0xFF: duplexConn"]
+        hd["handleDuplexData on each read loop"]
+        mb["actor mailbox"]
+        wp["ask worker pool"]
+        rep["REPLY on the same connection"]
+        h0 --> hd
+        h1 --> hd
+        hf --> hd
+        hd -->|"tell"| mb
+        hd -->|"ask"| wp
         wp --> rep
     end
 
@@ -152,11 +152,11 @@ flowchart LR
 | Ordinary | `OrdinaryLanes`, default 1 | User tells and asks | One stable lane per receiver |
 | Large | 1 | Receivers matching `LargeMessageDestinations`; oversized bulk control requests | Bulk transfers do not delay ordinary traffic |
 
-Each lane is one TCP connection with its own reader, writer, queue, tables and credit window. A lane is dialled on first use (`peer.ensureLane` in `internal/remoteclient/peer.go`), kept while healthy, and closed when the peer is closed or the system stops. The lane count is a choice of the dialling side; the acceptor serves whatever lanes arrive.
+Each lane is one TCP connection with its own reader, writer, queue, tables and credit window. A lane is dialled on first use ([Chapter 16, §16.4](chap-16.md#164-peers); `peer.ensureLane` in `internal/remoteclient/peer.go`), kept while healthy, and closed when the peer is closed or the system stops. The lane count is a choice of the dialling side; the acceptor serves whatever lanes arrive.
 
-**Routing** (`routeUser` in `internal/remoteclient/routing.go`). A receiver whose hierarchical path, the part after `host:port`, matches a `LargeMessageDestinations` pattern goes to the large lane. Patterns follow `path.Match`, so `*` stops at `/`. Every other receiver goes to ordinary lane `FNV-1a(receiver address) % OrdinaryLanes`. The peer caches the result per receiver, up to 8,192 entries (`peer.routeLocked`); beyond that the lane is recomputed on every send and is still the same.
+**Routing** (`routeUser` in `internal/remoteclient/routing.go`; [Chapter 16, §16.6](chap-16.md#166-routing-which-lane-a-call-takes) applies it to each call). A receiver whose hierarchical path, the part after `host:port` ([Chapter 4, §4.5](chap-04.md#45-names-addresses-and-identity)), matches a `LargeMessageDestinations` pattern goes to the large lane. Patterns follow `path.Match`, so `*` stops at `/`. Every other receiver goes to ordinary lane `FNV-1a(receiver address) % OrdinaryLanes`. The peer caches the result per receiver, up to 8,192 entries (`peer.routeLocked`); beyond that the lane is recomputed on every send and is still the same.
 
-A control request stays on the control lane. Three bulk requests (`RelocateBatchRequest`, `PersistPeerStateRequest`, `RemoteStateRequest`) move to the large lane when their encoded size exceeds `ChunkSize` (`isControlBulk` and `client.sendControlDuplex` in `internal/remoteclient/send.go`).
+A control request stays on the control lane. Three bulk requests (`RelocateBatchRequest`, [Chapter 21, §21.9](chap-21.md#219-the-relocator-and-its-workers); `PersistPeerStateRequest`, [Chapter 21, §21.8](chap-21.md#218-graceful-leave-the-peer-state-snapshot); `RemoteStateRequest`) move to the large lane when their encoded size exceeds `ChunkSize` (`isControlBulk` and `client.sendControlDuplex` in `internal/remoteclient/send.go`).
 
 **Ordering.** The guarantee is FIFO **per sender-receiver pair**. With one ordinary lane, all ordinary traffic to a peer is effectively FIFO. Control traffic may overtake user messages by design, and large destinations have their own ordering domain. Raising `OrdinaryLanes` trades a narrower ordering domain for parallelism.
 
@@ -170,7 +170,7 @@ A `duplexConn` owns one reader goroutine (`readLoop`), one writer goroutine (`wr
 - **Reclaim.** On the server, `idleTimeout` closes a connection that has received no frame at all for that long (`duplexConn.reclaimExpired`). PING and PONG are frames, so liveness traffic keeps an idle connection open. Client lanes have no reclaim window.
 - **Failure.** A read or write error closes the connection (`duplexConn.failTransport`). Every pending ask is completed with an error frame (`pendingTable.failAll`) and partial chunk groups are discarded. An ask that picks up that frame returns the connection's close error, not an empty `ERROR`, so its caller sees a transport failure (`duplexConn.askResult`). Nothing is retransmitted. On the client, the closed handler removes the lane from the peer (`peer.handleLaneClosed`), and the next send dials again. A failed dial arms a per-lane backoff from one second, doubling to 30 seconds (`peer.recordDialFailure`).
 - **Close.** `duplexConn.Close` lets the writer drain what was admitted, for at most `writeTimeout` (five seconds when unset), then closes the socket and waits for the reader.
-- **Server shutdown.** A duplex connection is served by its own goroutines, not by an accept worker, so closing the listener does not end it. `RemotingServer` therefore tracks the duplex connections it accepted (`trackDuplexConn`). `RemotingServer.Shutdown(d)` marks the server as shutting down and, in the background, waits for the asks already admitted (for at most `d` when `d > 0`, without bound when `d == 0`, not at all when `d < 0`) and then closes every tracked connection, which flushes the replies already queued (`closeDuplexConns`). `Shutdown` itself returns at once, like `TCPServer.Shutdown`. From the moment shutdown begins, an ask is refused with `FAILED_PRECONDITION` carrying `ErrRemotingDisabled` and its handler does not run (`admitAsk`), a connection that completes its handshake is closed at once, and an ask that finds the ask pool already stopped closes its connection, so the peer sees the connection end rather than an error reply. A peer that holds a connection to a stopping node therefore gets either `ErrRemotingDisabled` or a transport failure. The grain engine releases the owner's registry entry at once on `ErrRemotingDisabled`, and on a transport failure only after the cluster membership confirms the owner has left (`actorSystem.releaseUnreachableGrainOwner` in `actor/grain_engine.go`).
+- **Server shutdown.** A duplex connection is served by its own goroutines, not by an accept worker, so closing the listener does not end it. `RemotingServer` therefore tracks the duplex connections it accepted (`trackDuplexConn`). `RemotingServer.Shutdown(d)` marks the server as shutting down and, in the background, waits for the asks already admitted (for at most `d` when `d > 0`, without bound when `d == 0`, not at all when `d < 0`) and then closes every tracked connection, which flushes the replies already queued (`closeDuplexConns`). `Shutdown` itself returns at once, like `TCPServer.Shutdown`. From the moment shutdown begins, an ask is refused with `FAILED_PRECONDITION` carrying `ErrRemotingDisabled` and its handler does not run (`admitAsk`), a connection that completes its handshake is closed at once, and an ask that finds the ask pool already stopped closes its connection, so the peer sees the connection end rather than an error reply. A peer that holds a connection to a stopping node therefore gets either `ErrRemotingDisabled` or a transport failure. A grain call that gets `ErrRemotingDisabled` releases the owner's registry entry at once; on a transport failure it does so only after the cluster membership confirms the owner has left ([Chapter 13, §13.7](chap-13.md#137-when-the-recorded-owner-is-gone); `actorSystem.releaseUnreachableGrainOwner` in `actor/grain_engine.go`).
 
 ## 15.4 The wire protocol
 
@@ -195,6 +195,7 @@ Every frame starts with a fixed 16-byte, big-endian header (`Frame` in `internal
 | Lane byte differs from the negotiated lane | `duplexConn.readLoop` | Connection-scoped `ERROR`, then close (`duplexConn.rejectWrongLane`) |
 | `CHUNK` below revision 2, `TABLE` below revision 3, malformed chunk index or table entry | `handleInboundChunk`, `handleInboundTable` | Connection-scoped `ERROR`, then close (`duplexConn.rejectProtocol`) |
 | Table reference that is unknown or not negotiated, in a `DATA` envelope or in a message of a revision-5 tell batch | `RemotingServer.handleDuplexData` (`duplexConn.decodeTellBatch` for a batch) | Connection-scoped `ERROR`, then close |
+| A frame type the server does not serve after the handshake (`HELLO`, `HELLO_ACK`, an `ERROR` without correlation) | `RemotingServer.serveDuplexFrame` | Connection-scoped `ERROR`, then close |
 | Revision-5 tell batch that is otherwise malformed | `duplexConn.decodeTellBatch` | The whole batch is dropped and the connection stays up, as for an unmarshallable `RemoteTellRequest` |
 | `CREDIT` below revision 4 | `duplexConn.handleInboundCredit` | Ignored, so a buggy peer is tolerated |
 
@@ -206,13 +207,13 @@ The dialer sends `HELLO`; the acceptor answers `HELLO_ACK`. Both carry the same 
 
 1. The dialer writes `HELLO` with the lane it wants (`performHello`).
 2. The acceptor reads it, rejects a revision below 1 or an invalid lane with an `ERROR`, and computes the effective values (`acceptHello`, `negotiateHello`): the lower revision, the pairwise minimum of the four limits, the frame limit floored at 16 KiB, and the dialer's lane.
-3. The acceptor chooses the codec: the dialer's proposal when it equals its own, otherwise `NONE` (`selectCompression`). It writes the effective values back as `HELLO_ACK`. The remoting server's own codec is the one given to `remote.WithCompression`, passed down by `actorSystem.startRemoteServer` through `WithRemotingServerCompression`; it is `NONE` by default.
+3. The acceptor chooses the codec: the dialer's proposal when it equals its own, otherwise `NONE` (`selectCompression`). It writes the effective values back as `HELLO_ACK`. The remoting server's own codec is the one given to `remote.WithCompression` ([Chapter 17, §17.1](chap-17.md#171-the-remote-package)), passed down by `actorSystem.startRemoteServer` through `WithRemotingServerCompression`; it is `NONE` by default.
 4. The dialer computes the same minima and adopts the codec and the lane of the ACK (`OpenDuplex`). It accepts only its own proposal or `NONE` as the codec: any other answer gets a connection-scoped `ERROR` and fails the dial with `ErrUnexpectedCompressionCodec` (`performHello`). An older acceptor that answers "control" for every lane is thus followed, not fought.
 5. Both sides wrap the socket in the chosen compression (`wrapCompression`), switch reads to a 64 KiB buffer, and start the loops.
 
 Compression on a duplex connection needs care at close, because `Close` runs while the read loop is blocked inside the decoder and a write may be in flight. `compressedConn` (`internal/net/compress.go`) counts the goroutines inside the codec. A `Close` that finds none releases the codec first, so its last bytes reach the wire, then closes the socket: that is the legacy, single-owner case. A `Close` that finds one closes the socket first to unblock it, and the last call to leave releases the codec. Either way the codec is released exactly once, a later `Read` or `Write` returns `net.ErrClosed`, and a second `Close` does nothing.
 
-The handshake runs in clear frames, before compression, so it stays readable whatever codec follows. It is bounded in time on both sides: by the caller's deadline on the dialer, and by a ten-second window on the acceptor that also covers the first byte (`acceptHandshakeTimeout`). A cancelled dial closes the socket to unblock the read.
+The handshake runs in clear frames, before compression, so it stays readable whatever codec follows. It is bounded in time on both sides: by the caller's deadline on the dialer, and on the acceptor by a ten-second window (`acceptHandshakeTimeout`) that covers the first byte and the HELLO exchange; a shorter server `IdleTimeout`, when set, wins for the first byte (`TCPServer.sniffFirstByte`). A cancelled dial closes the socket to unblock the read.
 
 ### Envelopes
 
@@ -228,7 +229,7 @@ The handshake runs in clear frames, before compression, so it stays readable wha
 | `metadata` | `metaLen` bytes | present only with `hasMetadata` |
 | `payload` | rest of the body | the serialized message |
 
-A reference is a uvarint. Nonzero is a table ID. Zero is followed by a uvarint length and that many literal bytes. Metadata is present only when the header has `hasMetadata`. It carries the propagated headers and the deadline as **remaining time**, so the receiver rebuilds the deadline on its own clock (`Metadata` in `internal/net/metadata.go`).
+A reference is a uvarint. Nonzero is a table ID. Zero is followed by a uvarint length and that many literal bytes. Metadata is present only when the header has `hasMetadata`. It carries the propagated headers ([Chapter 16, §16.10](chap-16.md#1610-context-metadata-and-deadlines)) and the deadline as **remaining time**, so the receiver rebuilds the deadline on its own clock (`Metadata` in `internal/net/metadata.go`).
 
 | Serializer ID | Payload |
 |---|---|
@@ -238,7 +239,7 @@ A reference is a uvarint. Nonzero is a table ID. Zero is followed by a uvarint l
 | 3 | CBOR |
 | 255 | Custom serializer bytes, self-describing; `typeRef` must be empty |
 
-IDs 0 to 3 require a type name; any other ID is rejected (`validateSerializerID`).
+IDs 0 to 3 require a type name; any other ID is rejected (`validateSerializerID`). The serializers themselves are [Chapter 17, §17.2](chap-17.md#172-serializers).
 
 | Frame | Body |
 |---|---|
@@ -249,23 +250,24 @@ IDs 0 to 3 require a type name; any other ID is rejected (`validateSerializerID`
 | `TABLE` | kind (1 byte: 0 actor path, 1 type name) \| uvarint id \| uvarint length \| literal |
 | `PING`, `PONG` | empty; a `PONG` echoes the correlation of its `PING` |
 
-At revision 5 a coalesced tell batch is a `DATA` envelope with serializer ID 0 and the type name `goakt.duplex.TellBatch` (`TellBatchTypeName` in `internal/net/tell_batch.go`). It is not a protobuf message; its payload is:
+At revision 5 a coalesced tell batch ([Chapter 16, §16.8](chap-16.md#168-the-coalescer)) is a `DATA` envelope with serializer ID 0 and the type name `goakt.duplex.TellBatch` (`TellBatchTypeName` in `internal/net/tell_batch.go`). It is not a protobuf message; its payload is:
 
 | Part | Layout |
 |---|---|
 | Body | count (4 bytes, big-endian) \| message × count |
 | Message | `senderRef` \| `receiverRef` \| uvarint metadata count \| (uvarint length, key, uvarint length, value) × count \| uvarint payload length \| payload |
 
-The refs are actor-path table references encoded as in the `DATA` envelope. The count has a fixed width so the client can write it after packing the messages (`PutTellBatchCount`).
+The refs are actor-path table references encoded as in the `DATA` envelope. The count has a fixed width so the client can write it after packing the messages (`PutTellBatchCount`). A message carries at most 65,535 metadata entries (`maxTellBatchMetadataEntries`).
+
 ## 15.5 Correlation and dispatch
 
-**Asks.** `duplexConn.Ask` takes the next correlation ID from a per-connection counter, registers a waiter in the pending table, and submits the frame with `expectsReply`. The read loop hands a `REPLY` or a request-scoped `ERROR` to the waiter with that ID (`pendingTable.complete`). A timeout or a cancelled context removes the waiter, and a reply that arrives later is dropped and its buffer released. One slow ask never blocks the lane.
+**Asks.** `duplexConn.Ask` takes the next correlation ID from a per-connection counter, registers a waiter in the pending table, and submits the frame with `expectsReply`. The read loop hands a `REPLY` or a request-scoped `ERROR` to the waiter with that ID (`pendingTable.complete`). A timeout or a cancelled context removes the waiter, and a reply that arrives later is dropped and its buffer released. One slow ask never blocks the lane. How the asking actor gets its reply is [Chapter 5, §5.3](chap-05.md#53-how-a-reply-gets-back).
 
 **The server read loop** reads, validates, reassembles, answers pings and applies credits. Application frames go to `RemotingServer.handleDuplexData`:
 
-- `DATA` without `expectsReply` is a tell. The handler runs on the dispatch path and must do no more than enqueue into a mailbox.
+- `DATA` without `expectsReply` is a tell. The handler runs on the dispatch path and must do no more than enqueue into a mailbox ([Chapter 6](chap-06.md)). A tell with serializer ID 0 goes to the `ProtoHandler` registered for its type name; a revision-5 batch goes to the batch handler; any other tell goes to the tell handler (`RemotingServer.invokeDuplexTell`).
 - `DATA` with `expectsReply` is handed to the ask worker pool (`askPool`, a `WorkerPool[duplexAskTask]`). The worker runs the handler and submits a `REPLY` or an `ERROR` on the same connection (`handleDuplexAskTask`). The server never dials back.
-- A type name with a registered `ProtoHandler` is a control request; any other ask goes to the user ask handler (`RemotingServer.dispatchDuplexAsk`).
+- A type name with a registered `ProtoHandler` is a control request; any other ask goes to the user ask handler (`RemotingServer.dispatchDuplexAsk`; [Chapter 17, §17.4](chap-17.md#174-the-server)).
 
 ```mermaid
 sequenceDiagram
@@ -286,15 +288,15 @@ sequenceDiagram
     P-->>C: REPLY corr=42
 ```
 
-A request-scoped `ERROR` is decoded on the client with the same table as a legacy error reply (`decodeErrorPayload` and `checkProtoError` in `internal/remoteclient`), so the same server answer gives the same Go error on both protocols: `CODE_UNAVAILABLE` is `ErrRemoteSendFailure`, `CODE_FAILED_PRECONDITION` is parsed into `ErrRemotingDisabled` and its siblings, a full mailbox is `ErrMailboxFull`. A decode failure of one envelope is answered with a request-scoped `ERROR` and the connection stays up. A handler panic in the pool is recovered and answered with an `ERROR` (`RemotingServer.recoverDuplexAsk`). The pool has no capacity limit: when no worker is idle it starts a new goroutine, and `AddTask` fails only when the pool is stopped or not yet started (`WorkerPool.AddTask` in `internal/net/worker_pool.go`). A stopped pool closes the connection ([§15.3](#153-architecture)); a pool that has not started is answered with `CODE_UNAVAILABLE` (`RemotingServer.handleDuplexData`). The number of asks a server runs at once is therefore bounded only by what its peers send.
+A request-scoped `ERROR` is decoded on the client with the same table as a legacy error reply (`decodeErrorPayload` and `checkProtoError` in `internal/remoteclient`), so the same server answer gives the same Go error on both protocols: `CODE_UNAVAILABLE` is `ErrRemoteSendFailure`, `CODE_FAILED_PRECONDITION` is parsed into `ErrRemotingDisabled` and its siblings, a full mailbox is `ErrMailboxFull`. A decode failure of one envelope is answered with an `ERROR` that echoes the frame's correlation, and the connection stays up; a tell has correlation 0, so its `ERROR` looks connection-scoped on the wire. A handler panic in the pool is recovered and answered with an `ERROR` (`RemotingServer.recoverDuplexAsk`). The pool has no capacity limit: when no worker is idle it starts a new goroutine, and `AddTask` fails only when the pool is stopped or not yet started (`WorkerPool.AddTask` in `internal/net/worker_pool.go`). A stopped pool closes the connection ([§15.3](#153-architecture)); a pool that has not started is answered with `CODE_UNAVAILABLE` (`RemotingServer.handleDuplexData`). The number of asks a server runs at once is therefore bounded only by what its peers send ([Chapter 17, §17.5](chap-17.md#175-tell-and-ask)).
 
 **Pipelined dispatch.** On the acceptor the read loop calls the handler inline while the connection is quiet. When more bytes are already buffered, or frames are queued, it queues the frame and a transient goroutine drains the queue in arrival order (`duplexConn.deliverInbound`, `duplexConn.dispatchLoop`). The drainer exits ten milliseconds after the queue runs dry, so an idle connection holds no dispatch goroutine.
 
-**Writer batching.** The writer takes up to 32 ready frames and writes them in one vectored call (`tcpFramedConn.WriteFrames`). This byte-level batching is separate from the tell coalescer of the client, which packs many tells into one `RemoteTellRequest` and sends it as an internal-protobuf `DATA` tell on an ordinary lane (`client.flushTellBatchDuplex`). A batch whose marshalled size exceeds the negotiated message limit, less a 4 KiB margin, is split in order into several such tells (`tellBatchSplitLimit` in `internal/remoteclient/send.go`). The coalescer stays active for duplex peers (`internal/remoteclient/coalescer.go`).
+**Writer batching.** The writer takes up to 32 ready frames and writes them in one vectored call (`tcpFramedConn.WriteFrames`). This byte-level batching is separate from the tell coalescer of the client ([Chapter 16, §16.8](chap-16.md#168-the-coalescer); `internal/remoteclient/coalescer.go`), which packs many tells into one batch and sends it on an ordinary lane (`client.flushTellBatchDuplex`). At revision 5 the batch is written in the `TellBatchTypeName` layout (`client.sendTellBatchFrames`); below revision 5 it is one internal-protobuf `RemoteTellRequest` tell. In both forms a batch whose size would exceed the negotiated message limit, less a 4 KiB margin, is split in order into several tells (`tellBatchSplitLimit` in `internal/remoteclient/send.go`). The coalescer stays active for duplex peers.
 
 ## 15.6 Large messages
 
-A logical `DATA` or `REPLY` frame larger than `ChunkSize` is sent as a group of `CHUNK` frames when the connection is at revision 2 or above (`duplexConn.submitLogical` in `internal/net/duplex_chunk.go`).
+A logical `DATA` or `REPLY` frame larger than `ChunkSize` is sent as a group of `CHUNK` frames when the connection is at revision 2 or above (`duplexConn.submitLogical` in `internal/net/duplex_chunk.go`). The logical size is the 16-byte header plus the body.
 
 **Sender:**
 
@@ -311,7 +313,7 @@ A logical `DATA` or `REPLY` frame larger than `ChunkSize` is sent as a group of 
 |---|---|
 | First chunk declares more than `MaxMessageSize` | Request-scoped `ERROR`, nothing allocated, connection stays up |
 | First chunk while `MaxConcurrentLargeTransfers` groups are open | Request-scoped `ERROR`, connection stays up |
-| Index gap, duplicate first chunk, data beyond the declared total | Protocol violation: `ERROR`, then close |
+| Index gap, duplicate first chunk, zero declared total, first chunk with a nonzero index, data beyond the declared total | Protocol violation: `ERROR`, then close |
 | Continuation for an unknown group | Ignored (trailing chunks after a reject) |
 | Short group closed by `lastChunk` | Group freed (sender abort) |
 | Complete | The buffer is decoded as a logical frame and dispatched like an unchunked one |
@@ -328,7 +330,7 @@ At revision 3 each connection has four tables: sender and receiver, for actor pa
 
 - **Sender.** `duplexConn.PrepareRef` looks the literal up; on first use it assigns the next ID, starting at 1, and queues a `TABLE` frame **under the table mutex**, before the caller can queue the message that uses the ID (`senderTable.register`). With a single writer, registration always precedes use, and no acknowledgement is needed.
 - **Overflow.** A table holds 8,192 entries per kind. A full sender table returns ID 0 and the literal goes inline. So does a `TABLE` frame refused by a full writer queue: the registration is rolled back and a later message tries again.
-- **Receiver.** `handleInboundTable` installs the entry. A repeated identical entry is ignored. A conflicting ID, an unknown kind, a zero ID, an empty literal or overflow is a protocol violation.
+- **Receiver.** `handleInboundTable` installs the entry. A repeated identical entry is ignored. A conflicting ID, an unknown kind, a zero ID, an empty literal or overflow is a protocol violation. A literal longer than 16 MiB is refused when encoding (`maxTableLiteralLen` in `internal/net/table.go`).
 - **Reconnect.** Tables belong to the connection. A new connection starts empty. The peer's route cache stores a receiver's table ID together with the session that assigned it, and uses the ID only on that session (`encodeUserDataEnvelope` in `internal/remoteclient/send.go`).
 
 On the receiving side, a table hit for the sender also returns a cached opaque handle (`receiverTable.resolveRef`). The actor layer supplies the resolver, which builds the sender's `*PID` once per table entry (`WithRemotingServerSenderResolver`; `actorSystem.duplexRemoteTell` in `actor/remote_server.go`). `internal/net` stores it as `any` and stays independent of the `actor` package.
@@ -338,7 +340,7 @@ On the receiving side, a table hit for the sender also returns a cached opaque h
 - `ReadFrame` draws `DATA`, `REPLY`, `ERROR` and `CHUNK` bodies from a size-bucketed pool (`tcpReadPool`). The envelope is parsed in place and the payload is a subslice of that body.
 - The body goes back to the pool exactly once: after the tell handler returns, after the ask worker finishes, after a chunk is copied into its group, or when a late reply is dropped. Client callers release through `DuplexSession.ReleasePayload`.
 - A custom serializer may keep its input. For serializer ID 255 the payload is copied before `Deserialize` (`actorSystem.deserializeDuplexPayload`, `deserializeReplyEnvelope`).
-- HELLO, control requests and tell batches are marshalled into a pooled buffer and released as soon as the envelope is built (`MarshalProtoAppend`, `ReleaseMarshalBuffer`). `ERROR` bodies use plain `proto.Marshal`: they are queued for the writer and nothing signals when the write is done.
+- HELLO, control requests and the `RemoteTellRequest` form of a tell batch are marshalled into a pooled buffer and released as soon as the envelope is built (`MarshalProtoAppend`, `ReleaseMarshalBuffer`). `ERROR` bodies use plain `proto.Marshal`: they are queued for the writer and nothing signals when the write is done.
 
 Generated protobuf types use the Opaque API. Remoting code uses builders and accessors, never struct fields. This changes how the code reads and writes the types, not the wire format.
 
@@ -357,29 +359,29 @@ sequenceDiagram
     participant Q as sender out queue
     participant W as sender writeLoop
     participant R as receiver readLoop
+    participant SR as sender readLoop
     S->>Q: admission
     Q->>W: frame
     Note over W: DATA/CHUNK wait for sendWindow
     W->>R: frame
     Note over R: owns bytes, accumulate
-    participant SR as sender readLoop
     R->>SR: CREDIT n, at window/4
     SR->>W: applyCreditGrant: sendWindow += n, wake writer
 ```
 
 **Sender.** The writer charges the window when it moves a frame into the write batch, not at admission (`duplexConn.fillWindowedBatch`). Windowed frames without credit wait in the writer; `REPLY`, `ERROR`, `TABLE`, `CREDIT`, `PING` and `PONG` are exempt and pass them (`duplexConn.classifyOutbound`). That keeps credits, errors and liveness flowing when data is parked. One frame at least as large as the whole window may go when the window is full; the counter turns negative until grants restore it (`duplexConn.canChargeWindow`). That guarantees progress when the two sides are configured differently.
 
-`CREDIT`, `PING`, `PONG` and `ERROR` also bypass the admission cap (`admissionExemptFrameType`). A submit that finds the queue full waits until the caller's deadline, or `writeTimeout`, and then returns `ErrDuplexBackpressure`.
+`CREDIT`, `PING`, `PONG` and `ERROR` also bypass the admission cap (`admissionExemptFrameType`), and one windowed frame larger than the cap may enter an empty queue (`duplexConn.canAdmitLocked`). A submit that finds the queue full waits until the caller's deadline, or `writeTimeout`, and then returns `ErrDuplexBackpressure`.
 
 **Receiver.** It grants a frame's bytes once, when it takes ownership (`duplexConn.noteOwnedBytes`):
 
 | Frame | Granted when |
 |---|---|
-| `CHUNK` | Appended to its group, rejected, or ignored. The reassembled frame is not granted again |
+| `CHUNK` | Appended to its group, soft-rejected, or ignored. The reassembled frame is not granted again |
 | Ask or control `DATA` | Handed to the worker pool, or rejected |
 | Tell `DATA` | The message **leaves the mailbox**, or fails on the way to it |
 
-The tell row is a credit lease (`CreditLease` in `internal/net/duplex_lease.go`). The dispatch context carries the lease. The actor-side handler splits it into one share per message of the frame, shares summing to the frame cost, and each message carries its share into the mailbox. The share is released when the actor takes the message out (`PID.dispatchOne` in `actor/pid.go`), when delivery fails, or when the actor is torn down with messages still queued (`remoteHoldRegistry` in `actor/remote_hold_registry.go`). A handler that does not claim the lease gets the full grant when it returns, and a handler that panics has the remainder repaid. A stalled consumer therefore stops the grants, and its senders see backpressure instead of an unbounded mailbox.
+The tell row is a credit lease (`CreditLease` in `internal/net/duplex_lease.go`). The dispatch context carries the lease. The actor-side handler splits it into one share per message of the frame, shares summing to the frame cost, and each message carries its share into the mailbox. The share is released when the actor takes the message out (`PID.dispatchOne` in `actor/pid.go`), when delivery fails, or when the actor is torn down with messages still queued (`remoteHoldRegistry` in `actor/remote_hold_registry.go`, [Chapter 17, §17.9](chap-17.md#179-the-remote-hold-registry); mailboxes are [Chapter 6](chap-06.md)). A handler that does not claim the lease gets the full grant when it returns, and a handler that panics has the remainder repaid. A tell that arrives as a reassembled group carries no lease: its chunks were granted as they were appended. A stalled consumer therefore stops the grants, and its senders see backpressure instead of an unbounded mailbox.
 
 Grants are batched: the accumulator is flushed as one `CREDIT` frame when it holds a quarter of the window (`duplexConn.flushGrants`). A grant that cannot be queued is kept and retried after the next write. Because chunks are granted as they are appended, a message larger than the window completes without waiting for the application.
 
@@ -402,16 +404,16 @@ Without metadata the frame is `totalLen`, `nameLen`, type name and proto bytes; 
 
 The type name is the full protobuf name, resolved through the protobuf registry. The server tries the metadata layout first and falls back to the plain one (`RemotingServer.handleConn`). A frame above `MaxFrameSize`, a corrupt frame, an unknown type without a fallback handler, a handler error or a handler panic closes the connection.
 
-- **Client.** A LIFO pool of idle sockets per endpoint, 32 at most, each dropped when it has been idle for 30 seconds and is next taken (`Client.Get` in `internal/net/client.go`). A new socket is wrapped in TLS, then in compression (`Client.dial`).
+- **Client.** A LIFO pool of idle sockets per endpoint, `MaxIdleConns` at most (`DefaultMaxIdleConns`, 32). A socket idle for longer than the pool's idle timeout is dropped when it is next taken (`Client.Get` in `internal/net/client.go`). The timeout is 30 seconds for a bare `Client`; the actor system sets it to the remote config's `IdleTimeout` (`actorSystem.setupRemoting` in `actor/actor_system.go`). A new socket is wrapped in TLS, then in compression (`Client.dial`).
 - **Server.** Eight accept loops hand accepted sockets to a sharded worker pool with `GOMAXPROCS × 2` shards and a five-second idle worker lifetime (`TCPServer.Serve` in `internal/net/tcp_server.go`). Connection structs are pooled.
 - **Compression** wraps the whole connection (gzip, zstd or brotli; none by default). There is no negotiation on this path: both sides must be configured alike.
 - **Allocation.** Frame buffers come from a pool of power-of-two buckets from 256 B to 4 MiB (`FramePool`); the type name is read from the frame without a copy; the frame size is computed first so a frame is built in one allocation; the length prefix is read into a stack array.
 
 ### Accepting both
 
-`TCPServer.serveConn` applies TLS and then, in `auto` mode, reads one byte (`TCPServer.serveAutoConn`). `0x02` goes to the duplex handler; any other byte goes to the legacy path. The byte is put back in front of the stream (`prependConn`). The match is exact because legacy gzip and zstd streams start with other bytes. Legacy brotli has no magic byte and can start with `0x02`, so a deployment that uses brotli on the legacy path must pin a protocol.
+`TCPServer.serveConn` applies TLS ([Chapter 18, §18.2](chap-18.md#182-where-tls-is-applied)) and then, in `auto` mode, reads one byte (`TCPServer.serveAutoConn`). `0x02` goes to the duplex handler; any other byte goes to the legacy path. The byte is put back in front of the stream (`prependConn`). A legacy frame starts with a big-endian length, whose first byte is `0x00` or `0x01` under the 16 MiB frame limit, and legacy gzip and zstd streams start with their magic bytes (`0x1f`, `0x28`; `TestServeConnSniffRoutesFirstByte`). Legacy brotli has no magic byte and can start with `0x02`, so a deployment that uses brotli on the legacy path must pin a protocol.
 
-`remote.ProtocolPin` sets both sides of a node (`WithProtocolPin`):
+`remote.ProtocolPin` ([Chapter 17, §17.1](chap-17.md#171-the-remote-package)) sets both sides of a node (`WithProtocolPin`):
 
 | Pin | Accept | Dial |
 |---|---|---|
@@ -426,14 +428,16 @@ The type name is the full protobuf name, resolved through the protobuf registry.
 3. The call is retried once on the legacy path, and the peer stays legacy for 30 seconds (`peerLegacyReprobeInterval` in `internal/remoteclient/protocol_cache.go`).
 4. After that the next send probes duplex again. Before the duplex lane is used, the peer waits for every legacy send in flight to finish (`peer.waitLegacyDrain`), so the switch does not reorder messages.
 
+[Chapter 16, §16.5](chap-16.md#165-the-protocol-cache-and-the-pin) lists the cache transitions.
+
 ## 15.10 Semantics, defaults and invariants
 
 ### Failure and delivery
 
 - A tell that returns `nil` was **admitted**, not delivered.
-- A tell with no live lane is queued on a per-lane pump, byte-capped at the credit window (`peer.admitTell`, `tellPump`). A full pump blocks until the caller's deadline, or `writeTimeout`, and then returns `errors.ErrRemoteSendBackpressure`.
-- A tell that fails after admission (dial, encode, write) is reported through the tell-failure handler and becomes a dead letter. The caller is not told.
-- A tell whose write fails because the lane died never reached the writer queue. The pump dials once more and sends it again, in place, before the tells behind it (`peer.deliverAdmittedTell`). Frames already queued on a dead connection are not resent.
+- A tell goes straight to a live lane only when no earlier tell is queued on that lane. Otherwise (no live lane, or tells still pending) it is queued on a per-lane pump, byte-capped at the credit window (`peer.tellSendPlan`, `peer.admitTell`, `tellPump`). A full pump blocks until the caller's deadline, or `writeTimeout`, and then returns `errors.ErrRemoteSendBackpressure`.
+- A tell that fails after admission (dial, encode, write) is reported through the tell-failure handler and becomes a dead letter ([Chapter 5, §5.4](chap-05.md#54-dead-letters)). The caller is not told.
+- A tell whose write fails because the lane died never reached the writer queue. The pump dials once more and sends it again, in place, before the tells behind it (`peer.deliverAdmittedTell`); a direct send re-admits it to the pump (`client.sendTellDuplex`). Frames already queued on a dead connection are not resent.
 - A slow receiver slows its senders through credits. A direct send waits in the admission queue and returns `errors.ErrRemoteSendBackpressure` to its caller after the deadline or `writeTimeout`. A tell sent by the pump or the coalescer waits the same way with no caller: one still not admitted after `writeTimeout` fails and becomes a dead letter, like any other failure after admission (`peer.deliverAdmittedTell` in `internal/remoteclient/peer.go`; `coalescer.sendBatch` in `internal/remoteclient/coalescer.go`).
 - Two losses leave no dead letter. Tells still in a writer's queue when its connection dies are discarded with the connection: they have no waiter, and the writer only stops (`duplexConn.writeLoop` and `duplexConn.drainOutboundPending` in `internal/net/duplex.go`). A chunked tell the receiver refuses at its first chunk ([§15.6](#156-large-messages)) gets a request-scoped `ERROR` under the tell's fresh group correlation; no waiter is registered for it, so the read loop releases the frame and the tell is lost (`duplexConn.readLoop` in `internal/net/duplex.go`).
 - An ask timeout is local to its waiter and does not disturb the lane.
@@ -453,11 +457,11 @@ The type name is the full protobuf name, resolved through the protobuf registry.
 | `DialTimeout` | 5 s, set with `remote.WithDialTimeout` | Each TCP connect, on both protocols; also the whole lane setup of a dial started by the tell pump | No |
 | `WriteTimeout` | 10 s | Socket writes and admission waits | No |
 | `ReadIdleTimeout` | 10 s | Liveness probe interval | No |
-| `IdleTimeout` | 1,200 s | Server reclaim of a silent duplex connection; on a legacy connection, the deadline for reading the next request and writing its response | No |
+| `IdleTimeout` | 1,200 s | Server reclaim of a silent duplex connection; on a legacy connection, the deadline for reading the next request and writing its response; the idle lifetime of a pooled legacy client socket | No |
 | `ProtocolPin` | `auto` | [§15.9](#159-compatibility-two-protocols-on-one-port) | No |
 | Table capacity | 8,192 | Per kind, per connection; not configurable | No |
 
-`Config.Validate` (`remote/config.go`) also requires `MaxFrameSize ≥ ChunkSize`, `MaxMessageSize ≥ MaxFrameSize` and at most 4 GiB, `CreditWindow ≥ ChunkSize`, and `ReadIdleTimeout < IdleTimeout` when both are set. `MaxFrameSize` stays much larger than a chunk because a revision-1 peer cannot chunk.
+`Config.Validate` (`remote/config.go`; [Chapter 17, §17.1](chap-17.md#171-the-remote-package)) also requires `MaxFrameSize ≥ ChunkSize`, `MaxMessageSize ≥ MaxFrameSize` and at most 4 GiB, `CreditWindow ≥ ChunkSize`, and `ReadIdleTimeout < IdleTimeout` when both are set. `MaxFrameSize` stays much larger than a chunk because a revision-1 peer cannot chunk.
 
 ### Invariants to preserve
 
@@ -481,16 +485,11 @@ The type name is the full protobuf name, resolved through the protobuf registry.
 | Protobuf schemas and generated Opaque API types | `protos/internal`, `internal/internalpb`, `buf.gen.yaml` |
 | Operator documentation | `docs/advanced/remoting.mdx` |
 
-### Deferred work
-
-- **QUIC transport.** One connection per peer, streams for lanes, short-lived streams for large transfers, behind the existing `Transport` boundary. TCP stays the default because it can be deployed everywhere.
-- **Legacy removal.** In the next major release: delete the unary fallback, the first-byte sniff, the protocol pins and the legacy flush path of the coalescer. The coalescer itself stays for duplex tell batching. The frame limit can then be tightened towards the chunk size.
-
 ## Guarantees
 
 | Statement | Enforced by |
 |---|---|
-| A header with a bad version, an unknown type, reserved bits, an oversized length or a missing correlation is rejected; a zero frame limit is raised to the floor | `TestDecodeFrameHeaderAdversarial` in `internal/net/frame_test.go` |
+| Decoding rejects a truncated header, a bad version, an unknown type, reserved bits and an oversized length; encoding rejects a `REPLY` without correlation; a zero frame limit is raised to the floor | `TestDecodeFrameHeaderAdversarial` in `internal/net/frame_test.go` |
 | Negotiation takes the lower revision and the pairwise minimum of the frame limit, the message limit and the credit window | `TestNegotiateHelloPairwiseMinimum` in `internal/net/handshake_test.go` |
 | The acceptor keeps a codec only when both sides name the same one, and answers `NONE` otherwise | `TestHandshakeCompressionAgreement` in `internal/net/handshake_test.go`; `TestRemotingServerHandleDuplexConnNegotiatesCompression` in `internal/net/remoting_server_test.go` |
 | An actor system configured with `remote.WithCompression` answers that codec to a dialer that proposes it, and `NONE` to any other proposal | `TestRemoteServerNegotiatesDuplexCompression` in `actor/remote_server_test.go` |
@@ -499,14 +498,14 @@ The type name is the full protobuf name, resolved through the protobuf registry.
 | Closing a compressed connection while a read is blocked or a write is in flight releases the codec once and is idempotent | `TestCompressedConnCloseWhileReadBlocked`, `TestCompressedConnCloseWhileWriteInFlight` and `TestCompressedConnCloseIdle` in `internal/net/compress_test.go` |
 | A version mismatch in the handshake is answered with a connection-scoped `ERROR` | `TestHandshakeVersionMismatchInBandError` in `internal/net/handshake_test.go` |
 | The `HELLO_ACK` echoes the dialer's lane | `TestAcceptHelloAckEchoesDialerLane` in `internal/net/handshake_test.go` |
-| A peer that connects and never sends `HELLO` is dropped | `TestAcceptHelloHandshakeTimeout` in `internal/net/remoting_server_test.go` |
+| A peer that connects and sends nothing is dropped within the accept handshake window | `TestAcceptHelloHandshakeTimeout` in `internal/net/remoting_server_test.go` |
 | A frame on the wrong lane gets a connection-scoped `ERROR` and the connection closes | `TestDuplexRejectsMismatchedLanePing` in `internal/net/duplex_test.go` |
 | A silent peer is closed, and never before three probe intervals have passed | `TestDuplexLivenessClosesAfterTwoMissedPongs` in `internal/net/duplex_test.go` |
 | A read deadline that expires inside a frame loses no bytes; the next read resumes the frame | `TestFramedConnReadFrameResumesAcrossDeadline` in `internal/net/transport_test.go` |
 | Inbound PINGs keep a connection alive past the server idle timeout | `TestDuplexConnIdleTimeoutRefreshedByPing` in `internal/net/duplex_test.go` |
 | Replies are matched by correlation, in any order | `TestDuplexAskOutOfOrder` in `internal/net/duplex_test.go` |
 | An ask timeout clears its waiter; late replies are dropped and later asks still complete | `TestDuplexAskTimeoutClearsPending` and `TestLateCorrelatedReplyDoesNotStallReader` in `internal/net/duplex_test.go` |
-| A full outbound queue returns `ErrDuplexBackpressure` at the deadline | `TestDuplexBackpressure` in `internal/net/duplex_test.go` |
+| A frame the outbound admission cap cannot take returns `ErrDuplexBackpressure` at the caller's deadline | `TestDuplexBackpressure` in `internal/net/duplex_test.go` |
 | A revision-1 connection rejects an inbound `CHUNK`, and fails an oversized send with `ErrMessageTooLarge` | `TestDuplexRevisionOneRejectsInboundChunk` and `TestDuplexRevisionOneOversizeFailsFast` in `internal/net/duplex_chunk_test.go` |
 | An oversized group and a group beyond the concurrent cap are soft-rejected and the connection stays usable; an index gap is a hard error | `TestReassemblerOversizeSoftReject`, `TestReassemblerConcurrentCapSoftReject` and `TestReassemblerBadIndexHardError` in `internal/net/reassembly_test.go` |
 | A sender beyond the concurrent-transfer cap waits and then gets backpressure | `TestDuplexChunkSenderGating` in `internal/net/duplex_chunk_test.go` |
@@ -541,29 +540,31 @@ The type name is the full protobuf name, resolved through the protobuf registry.
 
 - The defaults of [§15.10](#1510-semantics-defaults-and-invariants), the 16 KiB frame floor, the 8,192-entry tables and route cache, and the 16 MiB limit on a table literal.
 - 64-slot outbound and inbound channels per connection; at most 32 frames per vectored write; a 64 KiB read buffer installed after the handshake.
-- The quarter-window grant threshold, the ten-millisecond drainer linger, the five-second close grace, the ten-second accept handshake window.
+- The quarter-window grant threshold, the ten-millisecond drainer linger, the five-second close grace (used when no write timeout is set), the ten-second accept handshake window.
 - Two missed probes as the liveness limit; the 30-second legacy re-probe; lane dial backoff from one second to 30 seconds.
 - The read pool covers `DATA`, `REPLY`, `ERROR` and `CHUNK`; buckets run from 256 B to 4 MiB and larger buffers are allocated and collected.
 - Reassembly buffers are not pooled.
-- Pending waiters are pooled channels of capacity one, 1,024 at most.
+- Pending waiters are pooled channels of capacity one, 1,024 at most, shared by the process.
 - FNV-1a over the full receiver address as the lane hash.
-- Legacy path: 32 idle sockets, 30-second idle timeout, eight accept loops, `GOMAXPROCS × 2` shards, a 20 MiB GC ballast.
+- Legacy path: 32 idle sockets, a 30-second default idle timeout on the bare client, eight accept loops, `GOMAXPROCS × 2` shards, a 20 MiB GC ballast.
 - The legacy bridges in `RemotingServer.invokeDuplexTell` and `RemotingServer.dispatchDuplexUserAskViaLegacy`, used when no duplex handler is registered.
 
 ## Behaviours to know
 
 | Behaviour | Source |
 |---|---|
-| A codec mismatch between two nodes is not an error on a duplex connection: the connection stays up, uncompressed. On a legacy connection a mismatch produces garbage | `selectCompression` in `internal/net/handshake.go` |
+| A codec mismatch between two nodes is not an error on a duplex connection: the connection stays up, uncompressed. The legacy path has no negotiation, so both sides must be configured alike | `selectCompression` in `internal/net/handshake.go` |
 | A header-level violation after the handshake closes the connection without an `ERROR` frame | `duplexConn.readLoop` in `internal/net/duplex.go` |
 | Credit for a tell comes back when the actor dequeues the message, not when it is enqueued. A blocked actor with a full window stalls every sender on that lane | `PID.dispatchOne` in `actor/pid.go`; `RemotingServer.handleDuplexData` in `internal/net/remoting_server.go` |
 | A tell handler runs on the dispatch path of its connection. A handler that blocks stops all later frames of that lane | `RemotingServer.handleDuplexData` in `internal/net/remoting_server.go` |
 | An ask deadline travels as remaining time and is enforced on the server; a tell carries metadata but no enforced deadline | `RemotingServer.handleDuplexData` in `internal/net/remoting_server.go` |
 | A `PING` counts as activity for the server idle timeout, so liveness probes keep a healthy idle connection open | `duplexConn.readLoop` in `internal/net/duplex.go` |
+| A tell whose envelope fails to decode, other than on a table reference, is answered with an `ERROR` of correlation 0 and the server keeps the connection. The client reads a correlation-0 `ERROR` as connection-scoped and retires that lane | `RemotingServer.handleDuplexData` in `internal/net/remoting_server.go`; `peer.handleLaneFrame` in `internal/remoteclient/peer.go` |
+| After a read deadline expires inside a gzip or zstd stream, the codec returns that same timeout on every later read. `duplexConn.readLoop` counts each as a quiet interval, so a compressed connection with `ReadIdleTimeout` set is closed one interval after its last frame, not three | `compressedConn.Read` in `internal/net/compress.go`; `duplexConn.readLoop` in `internal/net/duplex.go` |
 | Timeouts and refused connections do not mark a peer legacy; only EOF, reset or broken pipe before `HELLO_ACK` do | `isLegacyHandshakeFailure` in `internal/remoteclient/peer.go` |
 | A peer marked legacy is not probed for 30 seconds, even if it was upgraded a second later | `peer.ensureLane` in `internal/remoteclient/peer.go` |
 | After a failed dial, sends on that lane fail at once with the same error until the backoff expires | `peer.ensureLane` and `peer.recordDialFailure` in `internal/remoteclient/peer.go` |
-| A fire-and-forget tell never returns a transport error; only backpressure and the caller's own cancellation come back | `client.sendTellDuplex` in `internal/remoteclient/send.go` |
+| A fire-and-forget tell never returns a transport error; only backpressure and the caller's own cancellation come back. A tell above the negotiated message limit is dead-lettered with `ErrRemoteMessageTooLarge`, not returned | `client.sendTellDuplex` in `internal/remoteclient/send.go` |
 | A full table, or a `TABLE` frame refused by a full writer queue, makes the value travel as an inline literal, without an error | `senderTable.register` in `internal/net/table.go` |
 | A server's ask worker pool has no capacity limit; it grows a goroutine per concurrent ask | `WorkerPool.AddTask` in `internal/net/worker_pool.go` |
 | Tells queued on a connection that dies, and a chunked tell refused at its first chunk, are lost without a dead letter | `duplexConn.writeLoop` and `duplexConn.readLoop` in `internal/net/duplex.go` |

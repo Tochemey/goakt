@@ -40,36 +40,26 @@
 
 - Why GoAkt has replicated data types, and the design principles the implementation follows.
 - The seven CRDT types: their state, their operations, their merge rule and what each one sends as a delta.
-- What the Replicator system actor owns, how it is spawned, and what it does on every message it accepts.
-- How a delta travels through the topic actor, and what anti-entropy repairs when a delta is lost.
+- What the Replicator system actor ([Chapter 3, §3.4](chap-03.md#34-the-guardian-tree)) owns, how it is spawned, and what it does on every message it accepts.
+- How a delta travels through the topic actor ([Chapter 11, §11.4](chap-11.md#114-publish-and-subscribe)), and what anti-entropy repairs when a delta is lost.
 - What `WriteTo` and `ReadFrom` add, and what they do not guarantee.
 - How deletion, tombstones, pruning and snapshots work.
-- How one cluster per datacenter exchanges CRDT state through the cluster leader.
+- How one cluster per datacenter ([Chapter 22](chap-22.md)) exchanges CRDT state through the cluster leader ([Chapter 20, §20.8](chap-20.md#208-peers-members-and-the-leader)).
 
 ## 24.1 Motivation and design principles
 
-GoAkt has actors, clustering, remoting and grains. The CRDT layer adds **replicated data that actors on different nodes can read and write without coordination**. Without it, shared state means routing through one actor, using Olric maps directly, or adding an external store.
+GoAkt has actors, clustering ([Chapter 19](chap-19.md), [Chapter 20](chap-20.md)), remoting ([Chapter 15](chap-15.md)) and grains ([Chapter 13](chap-13.md)). The CRDT layer adds **replicated data that actors on different nodes can read and write without coordination**.
 
-A conflict-free replicated data type (CRDT) is a data structure that can be updated independently on any node and still converges, with no locks and no consensus rounds.
-
-| Use case | Without CRDTs | With CRDTs |
-|---|---|---|
-| Distributed counter (rate limits, metrics) | one actor as a bottleneck, or an external store | a `PNCounter` updated locally |
-| Cluster-wide session registry | quorum writes to an Olric map | an `ORSet`, always readable locally |
-| Feature flags, configuration | an external configuration service | an `LWWRegister` written from any node |
-| Topic membership | a central topic actor | an `ORSet` of subscribers |
-| Shopping cart | conflict resolution in user code | an `ORMap` with merge semantics |
-
-CRDTs fit the actor model: actors encapsulate state and CRDTs say how that state merges; actors exchange messages and a delta is a message; actors are location-transparent and replication does not care where the peer is; actors tolerate partitions and CRDTs make progress during one and converge after it.
+A conflict-free replicated data type (CRDT) is a data structure that can be updated independently on any node and still converges, with no locks and no consensus rounds. The types suit these uses: counters (`GCounter`, `PNCounter`), configuration and feature flags (`LWWRegister`, `Flag`), session tracking and subscriptions (`ORSet`), shopping carts and profiles (`ORMap`), and state whose conflicts the application wants to see (`MVRegister`), as `docs/advanced/distributed-data.mdx` lists them.
 
 The design principles, with what the code does for each:
 
 | Principle | Meaning in the code |
 |---|---|
 | Zero import cycles | `crdt/` imports nothing from GoAkt. `actor/` imports `crdt/` for `crdt.Config`, the message types and the data types. The Replicator lives in `actor/replicator.go`. |
-| No breaking changes | The CRDT layer adds one method to `ActorSystem`: `Replicator() *PID`. CRDTs are opt-in through `ClusterConfig.WithCRDT`; without it no Replicator is spawned. |
+| No breaking changes | The CRDT layer adds the method `Replicator() *PID` to `ActorSystem`. CRDTs are opt-in through `ClusterConfig.WithCRDT`; without it no Replicator is spawned. |
 | Reuse existing infrastructure | Deltas are disseminated through the topic actor ([Chapter 11, §11.4](chap-11.md#114-publish-and-subscribe)). There is no separate gossip layer. |
-| Actor-native | All access goes through `Tell` and `Ask` to the Replicator PID. |
+| Actor-native | All access goes through `Tell` and `Ask` ([Chapter 5, §5.1](chap-05.md#51-three-ways-to-send)) to the Replicator PID. |
 | Delta-based | The Replicator publishes `Delta()`, not the stored value. How small that delta is depends on the type ([§24.2](#242-the-crdt-types)). |
 | CRDT-as-value | Every mutator returns a new value. Only `ResetDelta` changes a value in place. |
 | GC-friendly | Capacity-hinted maps, no closures in merge paths, periodic compaction of causal metadata ([§24.11](#2411-memory-metrics-and-performance)). |
@@ -161,21 +151,21 @@ Every participating node runs its own Replicator. There is no coordinator, no cl
 
 Why an actor per node:
 
-1. **Serialised access.** The store is touched only inside the Replicator's `Receive`, so it needs no lock.
-2. **Backpressure.** The mailbox throttles local writers.
-3. **Supervision.** A failed Replicator is restarted and rebuilds from its snapshot and from peers.
-4. **Observability.** The usual actor metrics apply.
+1. **Serialised access.** The store is touched only inside the Replicator's `Receive` ([Chapter 8, §8.1](chap-08.md#81-one-object-per-message)), so it needs no lock.
+2. **Backpressure.** The mailbox ([Chapter 6](chap-06.md)) throttles local writers.
+3. **Supervision.** A failed Replicator is restarted ([Chapter 9, §9.6](chap-09.md#96-the-restart-itself)) and rebuilds from its snapshot and from peers.
+4. **Observability.** The usual actor metrics apply ([Chapter 12](chap-12.md)).
 5. **Idiom.** Users talk to it like to any actor.
 
 ### Spawning
 
-`ActorSystem.Start` calls `spawnReplicator` after the startup chain (remoting, cluster, guardians, topic actor, datacenter controller) and after the scheduler is started, because the Replicator schedules its own ticks (`actorSystem.Start` in `actor/actor_system.go`). `spawnReplicator` (`actor/replicator.go`):
+`ActorSystem.Start` ([Chapter 3, §3.3](chap-03.md#33-start)) calls `spawnReplicator` after the startup chain (remoting, cluster, guardians, topic actor, datacenter controller) and after the scheduler ([Chapter 11, §11.1](chap-11.md#111-the-scheduler)) is started, because the Replicator schedules its own ticks in `PostStart` (`actorSystem.Start` in `actor/actor_system.go`). `spawnReplicator` (`actor/replicator.go`):
 
 1. Returns without spawning unless the cluster is enabled and `ClusterConfig.WithCRDT` was called.
-2. Returns without spawning when `crdt.WithRole` names a role that the node's `ClusterConfig` roles do not contain. An empty role means every node participates.
-3. Stores a `crdtConfigExtension`, holding the `crdt.Config` and the local `datacenter.DataCenter`, in the system's extensions under `goakt.crdt.config`. The actor reads its configuration from there in `PreStart`, so a supervisor restart finds it again. It is set again on every `Start`.
-4. Spawns the actor as a system actor, long-lived, with a one-for-one supervisor that restarts on any error.
-5. Registers the metrics when a meter is available; a failure is logged, not returned.
+2. Returns without spawning when `crdt.WithRole` names a role that the node's `ClusterConfig` roles do not contain ([Chapter 20, §20.2](chap-20.md#202-configuration)). An empty role means every node participates.
+3. Stores a `crdtConfigExtension`, holding the `crdt.Config` and the local `datacenter.DataCenter`, in the system's extensions ([Chapter 12, §12.1](chap-12.md#121-extensions)) under `goakt.crdt.config`. The actor reads its configuration from there in `PreStart`, so a supervisor restart finds it again. It is set again on every `Start`.
+4. Spawns the actor ([Chapter 4, §4.1](chap-04.md#41-the-spawn-entry-points)) as a system actor, long-lived, with a one-for-one supervisor that restarts on any error ([Chapter 9, §9.1](chap-09.md#91-the-supervisor-value)).
+5. Registers the metrics ([§24.11](#2411-memory-metrics-and-performance)) when a meter is available; a failure is logged, not returned.
 6. Adds the PID under the system guardian.
 
 If `spawnReplicator` fails, `Start` shuts the Replicator down if it exists, stops the scheduler, runs the startup clean-up and returns the error.
@@ -198,7 +188,7 @@ If `spawnReplicator` fails, `Start` shuts the Replicator down if it exists, stop
 | `changedAt` | key ID to the time of the last local update |
 | `staleKeys`, `gapStart`, `heardWhileStale` | while back from a gap longer than the tombstone TTL: the keys held before the gap, the start of the gap, and the peers whose digest arrived since ([§24.7](#247-deletion-tombstones-and-pruning)) |
 | `watchers` | key ID to the PIDs subscribed to changes |
-| `subscriptions` | key IDs seen; written by `trackKey`, cleared by `forgetKey`, never read |
+| `subscriptions` | key IDs seen; written by `trackKey` and by `restoreFromSnapshot`, cleared by `forgetKey`, never read |
 | `pendingDeltas`, `pendingTombstones` | key ID to the one delta or the one tombstone waiting for the cross-datacenter flush, each with the sequence number of its last write ([§24.9](#249-cluster-integration-and-multi-datacenter)) |
 | `pendingSeq` | the counter that numbers the writes to the two pending buffers |
 | `dataCenterAccepted` | remote datacenter ID to the highest pending sequence number that datacenter accepted; filled on the leader only ([§24.9](#249-cluster-integration-and-multi-datacenter)) |
@@ -214,9 +204,9 @@ On `PostStart`, `handlePostStart`:
 
 1. Records its PID, the topic actor, the cluster, the remoting client and a `CRDTValueSerializer`.
 2. Sends `Subscribe` for the topic `goakt.crdt.deltas` to the topic actor.
-3. Schedules, each under a fixed reference and each only when its interval is positive: the anti-entropy tick; the prune tick; the snapshot tick when a snapshot store is open; the cross-datacenter flush tick when cross-datacenter replication is enabled; the cross-datacenter anti-entropy tick when that is enabled too.
+3. Schedules ([Chapter 11, §11.1](chap-11.md#111-the-scheduler)), each under a fixed reference and each only when its interval is positive: the anti-entropy tick; the prune tick; the snapshot tick when a snapshot store is open; the cross-datacenter flush tick when cross-datacenter replication is enabled; the cross-datacenter anti-entropy tick when that is enabled too.
 
-A scheduling error is reported with `ctx.Err`, which hands the actor to its supervisor.
+A scheduling error is reported with `ctx.Err`, which hands the actor to its supervisor ([Chapter 9, §9.2](chap-09.md#92-from-a-failure-to-a-decision)).
 
 `PostStop` cancels the five schedules and, when a snapshot store is open, writes a final snapshot and closes the store. An error from either is returned.
 
@@ -242,7 +232,7 @@ After every message, `Receive` copies the sizes of the store and of the tombston
 | `*crdt.Get` | user | `handleGet` |
 | `*crdt.Subscribe`, `*crdt.Unsubscribe` | user actor | `handleSubscribe`, `handleUnsubscribe` |
 | `*crdt.Delete` | user | `handleDelete` |
-| `*Terminated` | death watch | `handleTerminated` |
+| `*Terminated` | death watch ([Chapter 9, §9.8](chap-09.md#98-death-watch)) | `handleTerminated` |
 | `*internalpb.CRDTDelta` | topic actor, or a peer directly | `handleProtoDelta`, then `handleDelta` |
 | `*internalpb.CRDTTombstone` | topic actor, or a peer directly | `handleProtoTombstone`, then `applyTombstone` |
 | `*internalpb.CRDTReadRequest` | peer Replicator | `handleReadRequest` |
@@ -257,7 +247,7 @@ The user-facing API (`Update`, `Get`, `Subscribe`, `Unsubscribe`, `Delete`, `Cha
 
 ## 24.4 Replication through the topic actor
 
-All Replicators subscribe to one topic, `goakt.crdt.deltas`. **One topic, all keys**: the delta carries the key ID, the data type, the origin and the encoded state, and the receiver routes on the key ID. The topic actor provides delivery to local subscribers, a send to the topic actor of every peer, a time-limited duplicate filter keyed by sender, topic and message ID, and removal of terminated subscribers ([Chapter 11, §11.4](chap-11.md#114-publish-and-subscribe)).
+All Replicators subscribe to one topic, `goakt.crdt.deltas`. **One topic, all keys**: the delta carries the key ID, the data type, the origin and the encoded state, and the receiver routes on the key ID. The topic actor provides delivery to local subscribers, a send over remoting ([Chapter 16, §16.7](chap-16.md#167-sending-a-tell)) to the topic actor of every peer, a time-limited duplicate filter keyed by sender, topic and message ID, and removal of terminated subscribers ([Chapter 11, §11.4](chap-11.md#114-publish-and-subscribe)).
 
 ```mermaid
 sequenceDiagram
@@ -277,10 +267,9 @@ sequenceDiagram
     RB->>TB: Subscribe goakt.crdt.deltas
     RC->>TC: Subscribe goakt.crdt.deltas
     RA->>TA: Publish(delta)
+    TA->>RA: delta (own origin, ignored)
     TA->>TB: delta
     TA->>TC: delta
-    TB->>RB: delta
-    TA->>RA: delta (own origin, ignored)
     TB->>RB: delta
     TC->>RC: delta
 ```
@@ -298,7 +287,7 @@ Each Replicator holds its own store, and each subscribes to the topic at its loc
 5. Send `Changed` to the key's watchers.
 6. Reply with `UpdateResponse` when there is a sender.
 
-`publishDelta` encodes the delta as an `internalpb.CRDTDelta` with the Replicator's ID as origin, and tells the topic actor to publish it under the message ID `<nodeID>:<sequence>`, where the sequence counts from the start time of this incarnation of the node. It counts the publish, and when cross-datacenter replication is enabled it hands the delta, not yet encoded, to `bufferDelta` ([§24.9](#249-cluster-integration-and-multi-datacenter)). An encoding error is reported with `ctx.Err`.
+`publishDelta` encodes the delta as an `internalpb.CRDTDelta` ([§24.10](#2410-wire-format)) with the Replicator's ID as origin, and tells the topic actor to publish it under the message ID `<nodeID>:<sequence>`, where the sequence counts from the start time of this incarnation of the node. It counts the publish, and when cross-datacenter replication is enabled it hands the delta, not yet encoded, to `bufferDelta` ([§24.9](#249-cluster-integration-and-multi-datacenter)). An encoding error is reported with `ctx.Err`.
 
 Every write to `store` after `PreStart` goes through `setValue`, which also drops the key's cached content hash ([§24.5](#245-anti-entropy)). `restoreFromSnapshot` fills `store` directly in `PreStart`, while `hashes` is still empty.
 
@@ -309,17 +298,18 @@ Every write to `store` after `PreStart` goes through `setValue`, which also drop
 `handleDelta`:
 
 1. Ignore it when the origin is this Replicator. The topic actor delivers a publication to local subscribers too, so the publisher receives its own delta.
-2. Count it as received.
+2. Count it as received and record the contact with a peer (`observeContact`, [§24.7](#247-deletion-tombstones-and-pruning)).
 3. Ignore it when the key has a tombstone.
-4. If the key is unknown, store the delta as the value, record the type, increment the version and notify the watchers.
-5. Otherwise call `mergeValue`, which stores `current.Merge(delta)` and reports whether the content hash of the value changed, and count a merge.
-6. Increment the version and notify the watchers only when the value changed.
+4. A peer holds the key, so it is no longer stale ([§24.7](#247-deletion-tombstones-and-pruning)).
+5. If the key is unknown, store the delta as the value, record the type, increment the version and notify the watchers.
+6. Otherwise call `mergeValue`, which stores `current.Merge(delta)` and reports whether the content hash of the value changed, and count a merge.
+7. Increment the version and notify the watchers only when the value changed.
 
 A delta that changes nothing, such as a second delivery of the same delta, is merged and counted as a merge and has no other effect. `mergeValue` reports a change for a value whose type has no content hash.
 
 ### Watchers
 
-`handleSubscribe` appends the sender to the key's watcher list and watches it. A `Subscribe` that arrives with a nil sender is ignored. One sent with the package-level `Tell` carries the system's `NoSender` PID as its sender (`Tell` in `actor/api.go`), so that PID is registered as a watcher and is sent `Changed` and `Deleted` messages it does not handle. `handleUnsubscribe` removes the first matching PID by swap-remove. `handleTerminated` removes the dead actor from every key. `notifyWatchers` sends each watcher that is running its own message and drops those that are not: `notifyChanged` builds a `crdt.Changed` carrying the key and the current value, `notifyDeleted` a `crdt.Deleted` carrying the key. The Replicator stores only the key's ID and type, so it rebuilds the `Key` from them (`crdtKeyOf` in `actor/replicator.go`). Watchers hear of updates, peer deltas and anti-entropy merges, and of the removal of the node's copy by a deletion ([§24.7](#247-deletion-tombstones-and-pruning)); they do not hear of a coordinated read that changed the stored value.
+`handleSubscribe` appends the sender to the key's watcher list and watches it (death watch, [Chapter 9, §9.8](chap-09.md#98-death-watch)). A `Subscribe` that arrives with a nil sender is ignored. One sent with the package-level `Tell` carries the system's `NoSender` PID as its sender (`Tell` in `actor/api.go`), so that PID is registered as a watcher and is sent `Changed` and `Deleted` messages it does not handle. `handleUnsubscribe` removes the first matching PID by swap-remove. `handleTerminated` removes the dead actor from every key. `notifyWatchers` sends each watcher that is running its own message and drops those that are not: `notifyChanged` builds a `crdt.Changed` carrying the key and the current value, `notifyDeleted` a `crdt.Deleted` carrying the key. The Replicator stores only the key's ID and type, so it rebuilds the `Key` from them (`crdtKeyOf` in `actor/replicator.go`). Watchers hear of updates, peer deltas and anti-entropy merges, and of the removal of the node's copy by a deletion ([§24.7](#247-deletion-tombstones-and-pruning)); they do not hear of a coordinated read that changed the stored value.
 
 ### Division of work
 
@@ -333,12 +323,12 @@ A delta that changes nothing, such as a second delivery of the same delta, is me
 
 ## 24.5 Anti-entropy
 
-Publication through the topic actor can lose messages: a partition, a node restart, a topic actor restart. Anti-entropy is the periodic repair. It uses a direct `RemoteTell` between Replicators, not the topic, because it is a point-to-point exchange.
+Publication through the topic actor can lose a delta: a lookup, serialization or send failure towards a peer is logged and that peer is skipped ([Chapter 11, §11.4](chap-11.md#114-publish-and-subscribe)). Anti-entropy is the periodic repair. It uses a direct `RemoteTell` ([Chapter 16, §16.7](chap-16.md#167-sending-a-tell)) between Replicators, not the topic, because it is a point-to-point exchange.
 
 On each `antiEntropyTick` (default every 30 seconds), `handleAntiEntropy`:
 
-1. Returns when there is no cluster or no remoting client. When this node has stale keys and every current peer that runs a Replicator has sent it a digest since, keeps them ([§24.7](#247-deletion-tombstones-and-pruning)). Keeps the peers that run a Replicator: with `crdt.WithRole`, only those with the role (`replicatorActor.replicatorPeers` in `actor/replicator.go`). Returns when none is left.
-2. Picks one of them at random and looks up its Replicator by reserved name (`replicatorActor.lookupReplicator` in `actor/replicator.go`). `RemoteLookup` answers a node without the actor with the `NoSender` address and no error; the lookup treats that answer as "no Replicator" and the round ends without a send.
+1. Returns when there is no cluster or no remoting client, or when the cluster cannot list its peers. When this node has stale keys and every current peer that runs a Replicator has sent it a digest since, keeps them ([§24.7](#247-deletion-tombstones-and-pruning)). Narrows the peers to those that run a Replicator: with `crdt.WithRole`, only those with the role (`replicatorActor.replicatorPeers` in `actor/replicator.go`). Returns when none is left.
+2. Picks one of them at random and looks up its Replicator by reserved name (`replicatorActor.lookupReplicator` in `actor/replicator.go`). `RemoteLookup` ([Chapter 16, §16.1](chap-16.md#161-the-client-and-its-operations)) answers a node without the actor with the `NoSender` address and no error; the lookup treats that answer as "no Replicator" and the round ends without a send.
 3. Sends it a `CRDTDigest` built by `buildDigest`: one entry per stored key with the key, its type, its local version and the content hash of its value, every tombstone this node retains that is within the tombstone TTL, and this node's `since` unless it has stale keys.
 4. Counts the round, whether or not the send succeeded. A failed lookup, and a peer without a Replicator, are not counted.
 
@@ -358,7 +348,7 @@ It sends nothing when no key and no tombstone qualifies and the digest's `since`
 
 **Versions are local counters.** A key's version is incremented on every local update and on every received delta or full-state entry that changes the value. It is not a vector clock and two nodes do not count the same events, so two nodes can hold different values under the same version. The version is kept in the digest and in the snapshot, and it decides an exchange only against a node that sends no content hash.
 
-A restarted Replicator starts from its snapshot, or empty, and is filled by the answers to its own digests.
+A restarted Replicator starts from its snapshot ([§24.8](#248-snapshots)), or empty, and is filled by the answers to its own digests.
 
 ### The content hash
 
@@ -386,11 +376,11 @@ Three rules decide what counts as the same state:
 - **Only live dots count.** `hashLiveDots` takes, per element, the highest dot of each node. These are the dots `ORSet.Compact` keeps, so a set hashes the same before and after compaction, and two nodes that prune at different times do not see a difference.
 - **Bookkeeping does not count.** The pending delta and the changed marks are not replicated and take no part.
 
-User values (register values, set elements, map keys) are hashed by `hashValue`. The bytes hashed are a canonical encoding of the value, seeded with the name of its Go type, so the integer 1 and the string "1" differ. A string is hashed directly. A `proto.Message` is marshalled deterministically. Any other value is encoded as core deterministic CBOR, which sorts map keys. A pointer and the value it points to hash alike. Deterministic protobuf marshalling is stable for one build of a message type and not across protobuf versions; two nodes that disagree on the bytes of a value see different hashes for the same state, and the only consequence is an exchange that changes nothing.
+User values (register values, set elements, map keys) are hashed by `hashValue`. The bytes hashed are a canonical encoding of the value, seeded with the name of its Go type, so the integer 1 and the string "1" differ. A string is hashed directly. A `proto.Message` is marshalled deterministically. Any other value is encoded as core deterministic CBOR, which sorts map keys. A pointer and the value it points to hash alike, except for a string, which `hashValue` hashes directly and a pointer to a string takes the CBOR path. Deterministic protobuf marshalling is stable for one build of a message type and not across protobuf versions; two nodes that disagree on the bytes of a value see different hashes for the same state, and the only consequence is an exchange that changes nothing.
 
 **The cache.** The Replicator keeps the hash of each stored value in `hashes`. `contentHash` returns the cached hash or computes and caches it. `setValue`, through which every write to `store` after `PreStart` goes, drops the entry, and `removeValue` drops it with the key. `restoreFromSnapshot` writes to `store` directly in `PreStart`, when `hashes` is still empty. So a local update computes no hash; a received delta or full-state entry for a known key computes the hash of the merged value, and of the value before the merge when that one is not cached; and a key that has not changed since the last round costs one map lookup in `buildDigest`.
 
-**Cost.** `BenchmarkStateHash` in `crdt/benchmark_test.go` measures the hash on an Apple M1: about 190 ns for a `GCounter` with five slots; about 24 ns per element for an `ORSet` of strings, with no allocation; about 66 ns per element and one allocation each for an `ORSet` of integers, which take the CBOR path. A set of 10,000 strings hashes in about 0.23 ms. The cost is linear in the size of the value, as the merge that precedes it is.
+**Cost.** The hash visits every entry of the value once, so its cost is linear in the size of the value, as the merge that precedes it is. A string element is hashed directly; an integer element takes the CBOR path. `BenchmarkStateHash` in `crdt/benchmark_test.go` measures both for sets of 100, 1000 and 10000 elements.
 
 **Mixed versions.** The hash travels in the optional field `state_hash` of `CRDTDigestEntry`. A node whose code has no such field sends entries without it and ignores it in the entries it receives. For such an entry `differsFromPeer` applies the version rule. Between a node that sends the hash and one that does not, both directions therefore follow the version rule.
 
@@ -398,13 +388,13 @@ User values (register values, set elements, map keys) are hashed by `hashValue`.
 
 By default every operation is **local-first**. A write applies to the local store and publishes; a read returns the local value. Convergence is bounded by the topic actor's delivery and, when that fails, by the anti-entropy interval.
 
-`Update`, `Delete` and `Get` accept a `crdt.Coordination` level (`crdt/consistency.go`): `Majority`, `All`, `DCMajority`, `DCAll`. The Replicator implements `Majority` and `All` against the peers returned by the cluster that run a Replicator (`replicatorActor.replicatorPeers`: with `crdt.WithRole`, only the peers with the role), which exclude the local node. A selected peer whose lookup answers `NoSender` is skipped like an unreachable one (`replicatorActor.lookupReplicator`). `targetCount` returns `peers/2 + 1` for `Majority`, capped at the number of peers, all peers for `All`, and zero for anything else. `selectPeers` picks that many at random with a partial Fisher-Yates shuffle. `DCMajority` and `DCAll` are defined but not wired: they select no peer.
+`Update`, `Delete` and `Get` accept a `crdt.Coordination` level (`crdt/consistency.go`): `Majority`, `All`, `DCMajority`, `DCAll`. The Replicator implements `Majority` and `All` against the peers returned by the cluster ([Chapter 20, §20.8](chap-20.md#208-peers-members-and-the-leader)) that run a Replicator (`replicatorActor.replicatorPeers`: with `crdt.WithRole`, only the peers with the role), which exclude the local node. A selected peer whose lookup answers `NoSender` is skipped like an unreachable one (`replicatorActor.lookupReplicator`). `targetCount` returns `peers/2 + 1` for `Majority`, capped at the number of peers, all peers for `All`, and zero for anything else. `selectPeers` picks that many at random with a partial Fisher-Yates shuffle. `DCMajority` and `DCAll` are defined but not wired: they select no peer.
 
 | Operation | With `Majority` or `All` |
 |---|---|
-| `Update` (`coordinatedWrite`) | looks up each selected peer's Replicator and sends it the delta with `RemoteTell`, one after the other, then publishes the delta on the topic as usual |
+| `Update` (`coordinatedWrite`) | looks up each selected peer's Replicator and sends it the delta with `RemoteTell` ([Chapter 16, §16.7](chap-16.md#167-sending-a-tell)), one after the other, then publishes the delta on the topic as usual |
 | `Delete` (`coordinatedTombstone`) | sends the tombstone to each selected peer with `RemoteTell`, then publishes it on the topic as usual |
-| `Get` (`coordinatedRead`) | sends a `CRDTReadRequest` to each selected peer with `RemoteAsk` and the coordination timeout (default 5 seconds), merges every answer into the local value, stores the result and returns it |
+| `Get` (`coordinatedRead`) | sends a `CRDTReadRequest` to each selected peer with `RemoteAsk` ([Chapter 16, §16.9](chap-16.md#169-sending-an-ask-and-a-control-request)) and the coordination timeout (default 5 seconds), merges every answer into the local value, stores the result and returns it |
 
 Coordination is **best-effort**. A peer whose lookup, send or ask fails is logged or skipped; the operation does not fail. When the peer list is empty or cannot be read, a write falls back to the topic alone and a read returns the local value. A `RemoteTell` carries no acknowledgement from the peer's Replicator. `WriteTo` and `ReadFrom` therefore narrow the staleness window; they do not give quorum intersection. With or without them the system is eventually consistent: replicas that have applied the same updates hold the same state.
 
@@ -443,15 +433,15 @@ After a tombstone expires the key can be created again by a new update. The TTL 
 A node that was out of contact for longer than the TTL may still hold a key deleted meanwhile, whose tombstone has expired on every node. Restored from its snapshot or kept running through a partition, it would offer the key to peers that hold neither the key nor a tombstone, and they would take it as new. The Replicator prevents this with two times:
 
 - `lastContact`, updated by `observeContact` on every delta, tombstone, digest, anti-entropy answer and coordinated read from a peer, and saved with the snapshot.
-- `since`, the time from which the node knows every deletion: its start, the earlier `since` saved with a snapshot restored within the TTL, or the earlier `since` of a peer whose anti-entropy answer it merged.
+- `since`, the time from which the node knows every deletion: its start, the earlier `since` saved with a snapshot restored within the TTL, the earlier `since` of a peer whose anti-entropy answer it merged, or the `since` of the peer that resolved its stale keys (below).
 
-When `observeContact` finds the previous contact older than the TTL (`gapBeyondTTL`), `markStaleKeys` records the gap's start and marks as stale every stored key not updated locally since (`changedAt`). `restoreContact` does the same at once for a node restored from a snapshot saved longer than the TTL before, so it never advertises the `since` it had before the gap. A node that never had a contact has no gap, and neither has one without anti-entropy: no digest would resolve its stale keys. While a node has stale keys:
+When `observeContact` finds the previous contact older than the TTL (`gapBeyondTTL`), `markStaleKeys` records the gap's start and marks as stale every stored key not updated locally since the start of the gap (`changedAt`). `restoreContact` does the same at once for a node whose last contact saved with the snapshot is older than the TTL, so it never advertises the `since` it had before the gap. A node that never had a contact has no gap, and neither has one without anti-entropy: no digest would resolve its stale keys. While a node has stale keys:
 
 1. It does not send them: `handleDigest` leaves them out of its answer, `handleReadRequest` answers them as absent, and `handleDataCenterFlush` holds the pending cross-datacenter deltas. Its own reads still return them.
 2. It sends no `since`, so it cannot resolve another node's stale keys. A snapshot saves the start of the gap as its last contact and no `since` (`snapshotContact`), so a restart before the stale keys are resolved finds the gap again.
 3. A key it updates, or receives from a peer in a delta or an anti-entropy answer, is no longer stale.
 
-`resolveStaleKeys`, called by `handleDigest`, records the digest's sender. A digest whose `since` is at or before the start of the gap comes from a node that saw every deletion of the gap, and it lists every key that node holds: a stale key it lists is kept, one it does not list is removed with its pending cross-datacenter delta, as a tombstone would remove it, and its watchers are sent `Deleted`; the node then takes the peer's `since`. A digest without a `since` or with a later one resolves nothing. When every current peer that runs a Replicator has sent a digest and none resolved the stale keys, `handleAntiEntropy` keeps them (`keepStaleKeys`): no node knows more, as after a restart of the whole cluster.
+`resolveStaleKeys`, called by `handleDigest`, records the digest's sender. A digest whose `since` is at or before the start of the gap comes from a node that saw every deletion of the gap, and it lists every key that node holds: a stale key it lists is kept, one it does not list is removed with its pending cross-datacenter delta, as a tombstone would remove it, and its watchers are sent `Deleted`; the node then takes the peer's `since`. A digest without a `since` or with a later one resolves nothing. When every current peer that runs a Replicator has sent a digest and none resolved the stale keys, `handleAntiEntropy` keeps them (`keepStaleKeys`, which sets `since` to the current time): no node knows more, as after a restart of the whole cluster.
 
 ## 24.8 Snapshots
 
@@ -462,7 +452,7 @@ Snapshots are enabled when both `WithSnapshotInterval` (default zero, disabled) 
 `restoreFromSnapshot`, in `PreStart`:
 
 1. Does nothing when snapshots are not configured.
-2. Opens the store. A failure to open or to load is logged as a warning and the Replicator starts without that data; it does not fail the start.
+2. Opens the store. A failure to open or to load is logged as a warning and the Replicator starts without that data; it does not fail the start. A store that did not open stays unset, so no snapshot is taken; one that opened but failed to load stays attached, and the next snapshot replaces its content.
 3. For each entry, decodes the key and the data with a `CRDTValueSerializer`; an entry that fails is skipped with a warning. The value, its type, its **version** and the time of its last local update are restored.
 4. For each saved tombstone, `restoreTombstone` keeps it with its deletion time and node, unless its key cannot be decoded or the deletion is older than the tombstone TTL, by the rule of `applyTombstone` ([§24.7](#247-deletion-tombstones-and-pruning)). A node restored within the TTL therefore holds its deletions again and does not take a deleted key back from a peer that still has it. Tombstones that cannot be read are logged as a warning and count as none.
 5. Applies the last contact and the `since` (`restoreContact`, [§24.7](#247-deletion-tombstones-and-pruning)). Times that cannot be read are logged as a warning and count as none.
@@ -475,17 +465,17 @@ Watchers and the cross-datacenter buffers are not part of the snapshot.
 
 ### Join and departure
 
-**Join.** The new node spawns its Replicator, empty or restored from its snapshot. The other nodes' topic actors send to every current peer, so later publications reach it. It catches up on existing state through anti-entropy.
+**Join.** The new node spawns its Replicator, empty or restored from its snapshot. The other nodes' topic actors send to every current peer, so later publications reach it. It catches up on existing state through anti-entropy. How the cluster detects joins and departures is in [Chapter 19](chap-19.md) and [Chapter 20, §20.9](chap-20.md#209-cluster-events); what the actor system does with a departed node's actors is in [Chapter 21, §21.6](chap-21.md#216-what-every-node-does-on-nodeleft). The Replicator takes no part in either.
 
 **Departure.** The remaining nodes stop sending to it. No CRDT state is lost: it exists on the other replicas. The slots a departed node contributed to counters stay; they are historical contributions. Nothing prunes them.
 
-**Olric.** The CRDT store is independent of Olric. Olric keeps the actor and grain registry with quorum semantics; CRDTs are a separate, eventually consistent layer.
+**Olric.** The CRDT store is independent of Olric. Olric keeps the actor and grain registry ([Chapter 20, §20.4](chap-20.md#204-the-registry)); CRDTs are a separate, eventually consistent layer.
 
 **Roles.** With `crdt.WithRole`, nodes without the role run no Replicator and `Replicator()` returns `nil` there.
 
 ### One cluster per datacenter
 
-Each datacenter runs an independent GoAkt cluster with its own discovery. A control plane (NATS JetStream or etcd) holds one record per datacenter with its endpoints and a leased liveness; each cluster's leader registers and renews it and caches the active records.
+Each datacenter runs an independent GoAkt cluster with its own discovery. A control plane (NATS JetStream or etcd) holds one record per datacenter with its endpoints and a leased liveness; each cluster's leader registers and renews it and caches the active records ([Chapter 22, §22.1](chap-22.md#221-one-cluster-per-datacenter), [§22.7](chap-22.md#227-the-datacenter-controller), [§22.8](chap-22.md#228-the-cache-of-active-datacenters)).
 
 | Layer | Mechanisms | Scope |
 |---|---|---|
@@ -524,14 +514,16 @@ Every write to a pending entry takes the next value of `pendingSeq`: a new delta
 
 The buffers hold at most one entry per key changed since every remote datacenter on record last caught up, so at most one per key in the store. A non-leader buffers so that, when it becomes the leader, it has its own latest changes to send.
 
-**Flush.** There is one buffer for all datacenters and one **accepted mark** per datacenter: `dataCenterAccepted` maps a remote datacenter to the highest sequence number of a batch it accepted from this node. The key is `DataCenter.ID()` of the control-plane record, the zone, region and name joined, which is also the ID the record is registered under (`datacenter/data_center.go`). On each `dataCenterFlushTick` (default every 5 seconds), `handleDataCenterFlush`:
+**Flush.** There is one buffer for all datacenters and one **accepted mark** per datacenter: `dataCenterAccepted` maps a remote datacenter to the highest sequence number of a batch it accepted from this node. The key is `DataCenter.ID()` of the control-plane record, the zone, region and name concatenated, which is also the ID the record is registered under (`DataCenter.ID` in `datacenter/data_center.go`). On each `dataCenterFlushTick` (default every 5 seconds), `handleDataCenterFlush`:
 
-1. Returns when both buffers are empty, or when there is no cluster or remoting client.
-2. When this node is not the cluster leader, forgets its marks and returns. The buffers are kept.
-3. Returns when there is no controller. When the controller's cache is stale and it is configured to fail on a stale cache, counts a stale skip and returns.
-4. `sendPendingToRemoteDataCenters` encodes every pending delta once. For each active record that is not the local datacenter and has endpoints, `buildPendingBatch` builds a `CRDTDeltaBatch` of the entries stamped **above that datacenter's mark**, with the origin datacenter and the send time. An empty batch is not sent.
-5. `sendToDataCenter` shuffles the endpoints and tries each one, a lookup and a `RemoteTell` under the send timeout (default 10 seconds), until one succeeds. An endpoint that runs no Replicator, a member of the remote cluster without the CRDT role for instance, is skipped like one whose lookup fails. A success counts one send and raises the datacenter's mark to the highest sequence number in the batch that was sent. A failure leaves the mark.
-6. `dropAcceptedPending` forgets the mark of every datacenter that is not on record, then removes every entry stamped at or below the lowest mark of the remote datacenters on record. A datacenter on record without a mark, or without an endpoint, counts as zero.
+1. Returns when both buffers are empty.
+2. Returns while this node has stale keys: the pending deltas wait ([§24.7](#247-deletion-tombstones-and-pruning)).
+3. Returns when there is no cluster or remoting client.
+4. When this node is not the cluster leader, forgets its marks and returns. The buffers are kept.
+5. Returns when there is no controller. When the controller's cache is stale and it is configured to fail on a stale cache, counts a stale skip and returns.
+6. `sendPendingToRemoteDataCenters` encodes every pending delta once; a delta that cannot be encoded is logged and removed from the buffer. For each active record that is not the local datacenter and has endpoints, `buildPendingBatch` builds a `CRDTDeltaBatch` of the entries stamped **above that datacenter's mark**, with the origin datacenter and the send time. An empty batch is not sent.
+7. `sendToDataCenter` shuffles the endpoints and tries each one, a lookup and a `RemoteTell` under the send timeout (default 10 seconds), until one succeeds. An endpoint that runs no Replicator, a member of the remote cluster without the CRDT role for instance, is skipped like one whose lookup fails. A success counts one send and raises the datacenter's mark to the highest sequence number in the batch that was sent. A failure leaves the mark.
+8. `dropAcceptedPending` forgets the mark of every datacenter that is not on record, then removes every entry stamped at or below the lowest mark of the remote datacenters on record. A datacenter on record without a mark, or without an endpoint, counts as zero.
 
 What follows from these steps:
 
@@ -546,16 +538,15 @@ The flush runs inside one turn of the actor, sends included, so no entry is writ
 
 **Receive.** `handleIncomingBatch` drops a batch whose origin has the local name, region and zone. Otherwise it records the lag (receive time minus send time), counts the batch, and passes each tombstone to `handleProtoTombstone` and then each delta to `handleProtoDelta`. **Tombstones come first.** A batch holds a tombstone and a delta of one key only when the sender deleted the key and created it again after its tombstone expired. The tombstone removes the incarnation held by the receiver; it is older than the TTL, so it is not kept; the delta then creates the new incarnation, and the receiver holds what the sender holds. A tombstone still within its TTL is kept and rejects a delta of its key in the same batch, as it rejects any other. It does **not** republish on the local topic: the other nodes of the receiving datacenter converge through their own anti-entropy.
 
-**Cross-datacenter anti-entropy.** With `crdt.WithDataCenterAntiEntropy()` and a positive interval (default 2 minutes), on each tick the leader picks one remote datacenter with endpoints at random, one of its endpoints at random, and sends its digest there under the send timeout (`handleDataCenterAntiEntropy`). An endpoint that runs no Replicator gets no digest, and the round ends. The remote Replicator applies the digest's tombstones and answers with a `CRDTFullState` exactly as within a cluster, deletions included, so a round **pulls**: the leader that sent the digest receives what the remote node has more of. This is what carries data written on non-leader nodes, whose buffers are flushed only if they become the leader: every node of the origin datacenter holds that data through the topic, and the other datacenter's leader pulls it on one of its own rounds.
+**Cross-datacenter anti-entropy.** With `crdt.WithDataCenterAntiEntropy()` and a positive interval (default 2 minutes), on each tick the leader picks one remote datacenter with endpoints at random, one of its endpoints at random, and sends its digest there under the send timeout (`handleDataCenterAntiEntropy`). An endpoint that runs no Replicator gets no digest, and the round ends. A follower does nothing, and with a stale controller cache configured to fail the round is skipped. The remote Replicator applies the digest's tombstones and answers with a `CRDTFullState` exactly as within a cluster, deletions included, so a round **pulls**: the leader that sent the digest receives what the remote node has more of. This is what carries data written on non-leader nodes, whose buffers are flushed only if they become the leader: every node of the origin datacenter holds that data through the topic, and the other datacenter's leader pulls it on one of its own rounds.
 
 **Failure modes.**
 
 | Failure | Behaviour |
 |---|---|
-| Leader changes | the new leader flushes its own buffer on its next tick; anti-entropy repairs what was missed |
-| Partition between datacenters | each side continues and its leader keeps its pending entries; state converges when batches and anti-entropy resume |
-| Control plane unavailable | no remote endpoints, so nothing is sent and the pending entries wait; replication inside the datacenter is unaffected |
-| One node fails | handled inside its cluster |
+| Leader changes | the new leader has entries and no marks, so it sends everything pending on its next tick; the old leader forgets its marks on its next tick |
+| Batch not taken (partition, unreachable endpoints) | every endpoint of the datacenter is tried, the datacenter's mark stays, and its entries are sent again on later ticks |
+| Datacenter on record without endpoints, or none on record | nothing is sent to it; with a datacenter on record the entries wait, with none on record nothing is removed |
 | Stale datacenter cache | with fail-on-stale, the flush is skipped and counted, the pending entries wait, and the anti-entropy round is skipped; otherwise the cached list is used |
 | Leader has no Replicator | when `crdt.WithRole` excludes the leader, neither flush nor cross-datacenter anti-entropy runs |
 
@@ -577,20 +568,20 @@ The flush runs inside one turn of the actor, sends included, so no entry is writ
 
 Per type: `GCounterData` is a map of node to count; `PNCounterData` is two of them; `LWWRegisterData` is value bytes, timestamp and node; `ORSetData` is a list of entries (element bytes and dots) and a clock; `ORMapData` is a list of entries (key bytes and a nested `CRDTData`) and the key set as `ORSetData`; `FlagData` is a boolean; `MVRegisterData` is a list of entries (value bytes, node, counter) and a clock.
 
-`EncodeCRDT` and `DecodeCRDT` (`internal/ddata/crdt_codec.go`) convert between `crdt.ReplicatedData` and `CRDTData`. They read state through the exported accessors of the types (`State`, `RawState`) and rebuild through `GCounterFromState`, `PNCounterFromState`, `LWWRegisterFromState`, `ORSetFromRawState`, `ORMapFromRawState`, `MVRegisterFromRawState`; a flag is rebuilt with `NewFlag().Enable()`. A decoded value carries no pending delta, except that an enabled flag is marked changed.
+`EncodeCRDT` and `DecodeCRDT` (`internal/ddata/crdt_codec.go`; the key conversion is in [Chapter 17, §17.10](chap-17.md#1710-internalcodec)) convert between `crdt.ReplicatedData` and `CRDTData`. They read state through the exported accessors of the types (`State`, `RawState`) and rebuild through `GCounterFromState`, `PNCounterFromState`, `LWWRegisterFromState`, `ORSetFromRawState`, `ORMapFromRawState`, `MVRegisterFromRawState`; a flag is rebuilt with `NewFlag().Enable()`. A decoded value carries no pending delta, except that an enabled flag is marked changed.
 
-User values (register values, set elements, map keys) are `any`. `CRDTValueSerializer` (`internal/ddata/crdt_serializer.go`) encodes a `proto.Message` with the protobuf serializer and everything else with the CBOR serializer; on decode it tries protobuf first and falls back to CBOR. A value that neither can encode fails the encoding of the whole delta.
+User values (register values, set elements, map keys) are `any`. `CRDTValueSerializer` (`internal/ddata/crdt_serializer.go`) encodes a `proto.Message` with the protobuf serializer and everything else with the CBOR serializer ([Chapter 17, §17.2](chap-17.md#172-serializers)); on decode it tries protobuf first and falls back to CBOR. A value that neither can encode fails the encoding of the whole delta.
 
 ## 24.11 Memory, metrics and performance
 
 ### Allocation rules
 
-| Rule | Rationale |
+| Rule | What the code does |
 |---|---|
 | Copy-on-write values | every mutator returns a new value; no hidden shared state |
 | Pre-sized maps | `Clone`, `State`, `Delta` and merge paths use a capacity hint where the size is known |
 | Snapshot accessors | `ORSet.Elements` and `ORMap.Entries` return fresh containers, so internal maps do not escape |
-| No closures in merge paths | `Merge` and `Delta` allocate none; `Update.Modify` is the user's and is outside them |
+| No closures in merge paths | `Merge` and `Delta` create no closures; `Update.Modify` is the user's and is outside them |
 | Concrete counter state | counters hold `map[string]uint64`; set, map and register elements are `any` because they must be comparable at run time |
 
 | Type | What a merge allocates |
@@ -602,11 +593,11 @@ User values (register values, set elements, map keys) are `any`. `CRDTValueSeria
 | `ORMap` | a key-set merge and one merge or clone per value |
 | `MVRegister` | a new clock map and entry slice |
 
-In the Replicator: pending entries are removed one at a time with `delete` (`dropAcceptedPending`, `applyTombstone`, `bufferTombstone`) and the pending maps are never reallocated, so they keep their buckets; the content hash of a value is cached until the value changes; the origin datacenter message is built once in `PreStart`; metric values are atomics because the metrics callback runs on another goroutine; watcher removal is a swap-remove; `buildDigest` allocates the digest entries and keys as two contiguous slices.
+In the Replicator: pending entries are removed one at a time with `delete` (`dropAcceptedPending`, `applyTombstone`, `bufferTombstone`) and the pending maps are never reallocated, so they keep their buckets; the content hash of a value is cached until the value changes; the origin datacenter message is built once in `PreStart`; metric values are atomics because the metrics callback runs on another goroutine; watcher removal is a swap-remove; `buildDigest` allocates the digest entries and keys in contiguous backing slices.
 
 ### Metrics
 
-Registered by `registerReplicatorMetrics` with the attribute `actor.system` (`actor/replicator.go`, `internal/metric/replicator_metric.go`):
+Registered by `registerReplicatorMetrics` with the attribute `actor.system` (`actor/replicator.go`, `internal/metric/replicator_metric.go`; [Chapter 12, §12.4](chap-12.md#124-opentelemetry-instruments)):
 
 | Instrument | Kind | Value |
 |---|---|---|
@@ -626,10 +617,9 @@ Registered by `registerReplicatorMetrics` with the attribute `actor.system` (`ac
 ### Performance
 
 - **Memory.** All state is in memory and grows with the number of keys and the size of each value. `ORSet` and `ORMap` carry dots that grow with adds until compaction. Tombstones live for their TTL.
-- **Network.** The topic actor sends every publication to every peer. The design accepts this for large clusters because deltas are small and the rate is the update rate. Anti-entropy is one digest to one peer per interval. Cross-datacenter batching turns an interval's deltas into one message per datacenter, with one delta per key.
-- **CPU.** Merges are map walks and comparisons. The Replicator is one actor, so its throughput is bounded by one core.
-
-The design set these targets; no test enforces them: more than 500,000 local updates per second on one `PNCounter` key; more than 1,000,000 local reads per second; convergence under one second at the 95th percentile for five nodes and under three seconds for fifty. `crdt/benchmark_test.go` reports allocations for the merge path of every type, for the mutators of every type but `Flag`, for clone and delta on every type but `LWWRegister` (which has neither) and `ORMap` (which has clone only), and for the content hash. Merges clone before combining, so their allocations scale with the state size.
+- **Network.** The topic actor sends every publication to every peer. Anti-entropy is one digest to one peer per interval. Cross-datacenter batching turns an interval's deltas into one message per datacenter, with one delta per key.
+- **CPU.** The Replicator is one actor, so its work runs on one turn at a time. A merge clones before combining, so its allocations scale with the state size.
+- **Benchmarks.** `crdt/benchmark_test.go` benchmarks the merge path of every type, for the mutators of every type but `Flag`, for clone and delta on every type but `LWWRegister` (which has neither) and `ORMap` (which has clone only), and for the content hash. `BenchmarkStateHash` hashes a `GCounter` of five slots and an `ORSet` of 100, 1000 and 10000 strings and integers.
 
 ## Guarantees
 
@@ -655,7 +645,7 @@ The design set these targets; no test enforces them: more than 500,000 local upd
 | The digest has one entry per stored key with its version | `TestReplicatorDigest` in `actor/replicator_test.go` |
 | Each type's content hash is the same for the same state reached through different operation orders and through merges in either direction, differs for different states, and is unchanged by `Clone` and `ResetDelta`; for `GCounter`, `LWWRegister`, `MVRegister`, `ORSet` and `ORMap` also by a round trip through the raw state | `TestGCounterStateHash` in `crdt/gcounter_test.go`, `TestPNCounterStateHash` in `crdt/pncounter_test.go`, `TestFlagStateHash` in `crdt/flag_test.go`, `TestLWWRegisterStateHash` in `crdt/lww_register_test.go`, `TestMVRegisterStateHash` in `crdt/mv_register_test.go`, `TestORSetStateHash` in `crdt/or_set_test.go`, `TestORMapStateHash` in `crdt/or_map_test.go` |
 | Compaction does not change the content hash of an `ORSet` or an `ORMap`; only the highest dot of a node counts for an element | `TestORSetStateHash` in `crdt/or_set_test.go`, `TestORMapStateHash` in `crdt/or_map_test.go`, `TestHashLiveDots` in `crdt/hash_test.go` |
-| A user value hashes by type and content: map order inside it does not matter, a pointer hashes like its value, and protobuf messages hash by content | `TestHashValue` in `crdt/hash_test.go` |
+| A user value hashes by type and content: map order inside it does not matter, a pointer to a struct hashes like its value, and protobuf messages hash by content | `TestHashValue` in `crdt/hash_test.go` |
 | A digest entry carries the content hash of the stored value. Different hashes send the key's state whatever the versions; equal hashes send nothing whatever the versions; an entry without a hash follows the version rule; a key the peer lacks is sent | `TestReplicatorAntiEntropyContentHash` in `actor/replicator_test.go` |
 | Two Replicators holding different values of a key at the same version hold the merged value after each has pulled from the other, and further rounds change no version | `TestReplicatorAntiEntropyRepairsEqualVersions` in `actor/replicator_test.go` |
 | A delta delivered twice advances the version once and sends one `Changed`; a full-state entry that changes nothing advances no version and sends no `Changed` | `TestReplicatorUnchangedMergeIsSilent` in `actor/replicator_test.go` |
@@ -664,7 +654,7 @@ The design set these targets; no test enforces them: more than 500,000 local upd
 | A full-state entry for a tombstoned key is skipped | `TestReplicatorHandleDigestAndFullState` in `actor/replicator_test.go` |
 | A read request is answered with the local value, or with no data for an unknown key | `TestReplicatorHandleReadRequest` in `actor/replicator_test.go` |
 | The message sequence of a Replicator starts at its start time, and a new incarnation of the Replicator starts above every ID the previous one took | `TestReplicatorMessageSequenceAfterRestart` in `actor/replicator_test.go` |
-| A snapshot restores value, type and version, and the tombstones within the TTL with their deletion time and node, skipping an expired one and one whose key cannot be decoded; a snapshot saves the tombstones within the TTL and not the expired ones; stopping the system writes a final snapshot with its tombstones; a stored key without a type fails the snapshot build | `TestReplicatorRestoreFromSnapshot`, `TestReplicatorPostStopWithSnapshot` and `TestReplicatorBuildSnapshotEntriesErrors` in `actor/replicator_test.go` |
+| A snapshot restores value, type and version, and the tombstones within the TTL with their deletion time and node, skipping an expired one and one whose key cannot be decoded; a snapshot saves the tombstones within the TTL and not the expired ones; stopping the system writes a final snapshot with its tombstones; a stored key without a type fails the snapshot build | `TestReplicatorRestoreFromSnapshot`, `TestReplicatorHandleSnapshot`, `TestReplicatorPostStopWithSnapshot` and `TestReplicatorBuildSnapshotEntriesErrors` in `actor/replicator_test.go` |
 | The snapshot store round-trips entries, tombstones and both contact times, overwrites both on save, skips an entry or a tombstone with an empty key ID, reads a missing or zero time as the zero time and a missing tombstones bucket as no tombstones, opens a file of a version without tombstones and saves to it, fails on a malformed time or tombstone, on a key that is not valid UTF-8 or is larger than BoltDB allows, on a file whose entries bucket is missing, on a snapshot path that is a directory and on a file that cannot be removed, and refuses use after `Close` | `TestStore` in `internal/ddata/snapshot_test.go` |
 | A contact within the TTL marks no key stale. After a longer gap, a peer that saw the whole gap removes the stale keys it does not list, and their watchers are sent `Deleted`; a peer that came after the gap, or that sends no `since`, resolves nothing and is sent no stale key. A key written after the gap, or received from a peer in a delta or an answer, is not stale. A coordinated read gets no stale key, and a node with stale keys sends no `since`. An answer passes on an earlier `since` only, and a digest with a later `since` is answered with it even when nothing else differs. Without anti-entropy no key is marked stale. A node restored after the TTL marks its keys stale before any contact; one restored within the TTL keeps its earlier `since`; a snapshot taken while keys are stale keeps the gap. The stale keys are kept once every peer that runs a Replicator is heard from, and the cross-datacenter flush waits until then. The last contact and the local update times come back from the snapshot, and a last contact that cannot be read counts as no contact | `TestReplicatorStaleKeys` in `actor/replicator_test.go` |
 | In a three-node cluster, a node restored from its snapshot after the tombstone TTL does not bring back a key deleted while it was away, nor one whose tombstone is still live, whether its peers kept running or restarted from their snapshots during the gap | `TestReplicatorCluster` in `actor/replicator_test.go` |
@@ -704,24 +694,25 @@ The design set these targets; no test enforces them: more than 500,000 local upd
 | Against a node that sends no content hash, anti-entropy compares versions, which are local event counts: equal versions with different values exchange nothing | `replicatorActor.differsFromPeer` in `actor/replicator.go` |
 | An anti-entropy round is a pull: the node that answers a digest learns nothing from it, and a node that is ahead of its peer still receives the peer's older state | `replicatorActor.handleDigest` in `actor/replicator.go` |
 | Two nodes that encode a protobuf value to different bytes see different hashes for the same state and exchange it on every round, changing nothing | `hashValue` in `crdt/hash.go` |
+| An element, key or register value held as a pointer to a string hashes differently from the same string, so a set whose elements reach a peer in the other form is exchanged on every round, changing nothing | `hashValue` in `crdt/hash.go` |
 | A coordinated read stores the merged value without incrementing its version or notifying watchers | `replicatorActor.handleGet` in `actor/replicator.go` |
 | `Majority` is computed over the peers, which exclude the local node; `DCMajority` and `DCAll` contact no peer | `replicatorActor.targetCount` in `actor/replicator.go` |
 | Coordination never fails an operation: unreachable peers, and peers without a Replicator, are skipped | `replicatorActor.coordinatedWrite` and `replicatorActor.coordinatedRead` in `actor/replicator.go` |
 | Coordinated calls and cross-datacenter sends run in the Replicator's turn and hold it for their duration | `replicatorActor.coordinatedRead` and `replicatorActor.sendToDataCenter` in `actor/replicator.go` |
 | An `ORSet` delta carries every live element of each node it touches, so its size grows with the set, not with the change | `ORSet.Delta` in `crdt/or_set.go` |
 | An `ORMap` delta is the whole map; `ORMap.Set` merges into an existing value | `ORMap.Delta` and `ORMap.Set` in `crdt/or_map.go` |
-| Tombstones and watchers do not survive a Replicator restart; the store does only with snapshots; the cross-datacenter buffers do | `replicatorActor.PreStart` in `actor/replicator.go` |
+| After a supervisor restart the store, the tombstones and the watchers are gone unless a snapshot restores the store and the tombstones within the TTL; the cross-datacenter buffers and accepted marks are kept | `replicatorActor.PreStart` in `actor/replicator.go` |
 | A snapshot store that cannot be opened is a warning; the Replicator runs without persistence | `replicatorActor.restoreFromSnapshot` in `actor/replicator.go` |
 | A failed final snapshot makes `PostStop` return an error | `replicatorActor.PostStop` in `actor/replicator.go` |
 | A non-leader's cross-datacenter buffers are flushed only if it becomes the leader; they hold one entry per key | `replicatorActor.handleDataCenterFlush` and `replicatorActor.bufferDelta` in `actor/replicator.go` |
 | A remote datacenter that cannot be reached keeps the entries it has not accepted in the buffer for as long as it stays on record | `replicatorActor.dropAcceptedPending` in `actor/replicator.go` |
 | A node that becomes the leader sends every remote datacenter everything it has pending, whatever the previous leader had delivered | `replicatorActor.handleDataCenterFlush` in `actor/replicator.go` |
 | A `RemoteTell` that returns no error counts as acceptance; a receiver that then rejects an entry, for example a delta of a key whose tombstone it still holds, is not sent it again | `replicatorActor.sendToDataCenter` and `replicatorActor.handleDelta` in `actor/replicator.go` |
-| A node that restarts with an empty or stale store and the same node ID writes slots and dots the cluster has already seen: a counter increment is dominated by the peers' higher slot and an `ORSet` add by their clock, so the write is lost until the node's next anti-entropy round pulls the key; the caller still gets an `UpdateResponse` | `GCounter.Merge` in `crdt/gcounter.go`, `ORSet.isDominated` in `crdt/or_set.go` |
+| A node that restarts with an empty or stale store and the same node ID writes slots and dots the cluster has already seen: a counter increment is dominated by the peers' higher slot and an `ORSet` add by their clock, so the peers do not keep the write, and the node's next anti-entropy round pulls their state over it; the caller still gets an `UpdateResponse` | `GCounter.Merge` in `crdt/gcounter.go`, `isDominated` in `crdt/or_set.go` |
 | `ORMap.Remove` followed by `Set` does not reset the value: the removal carries no causal record, so a peer merges the new value into the old one it still holds, and anti-entropy brings the merged value back | `ORMap.Remove` and `ORMap.Merge` in `crdt/or_map.go` |
-| A snapshot saves no tombstones, so a key deleted while a node was away comes back within the TTL if every node that held the tombstone restarts before that node returns | `replicatorActor.buildSnapshotEntries` and `replicatorActor.restoreFromSnapshot` in `actor/replicator.go` |
+| A coordinated read stores the merged value of a key even when the node holds a tombstone for it, because `handleGet` does not consult the tombstones | `replicatorActor.handleGet` in `actor/replicator.go` |
 | With cross-datacenter replication enabled and no remote datacenter on record, the pending entries are never cleared | `replicatorActor.dropAcceptedPending` in `actor/replicator.go` |
-| A tombstone that arrives later than the tombstone TTL after the deletion deletes the key and is not kept | `replicatorActor.handleProtoTombstone` in `actor/replicator.go` |
+| A tombstone that arrives later than the tombstone TTL after the deletion deletes the key and is not kept | `replicatorActor.applyTombstone` in `actor/replicator.go` |
 | A receiver whose clock or tombstone TTL makes an old tombstone look live keeps it and rejects the delta of the recreated key in the same batch | `replicatorActor.handleProtoTombstone` and `replicatorActor.handleDelta` in `actor/replicator.go` |
 | A node back after a gap longer than the tombstone TTL holds its stale keys back from peers until they are resolved, and its own reads still return them | `replicatorActor.markStaleKeys` and `replicatorActor.handleDigest` in `actor/replicator.go` |
 | Two groups of two or more nodes that run apart for longer than the TTL never mark keys stale, and bring back each other's deleted keys when they merge | `replicatorActor.observeContact` in `actor/replicator.go` |

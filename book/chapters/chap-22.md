@@ -22,16 +22,16 @@
 
 ## What you will learn
 
-- How several independent clusters are linked through a control plane, and which operations cross from one to another.
+- How several independent clusters ([Chapter 20](chap-20.md)) are linked through a control plane, and which operations cross from one to another.
 - What a datacenter record holds, its four states, and how it is stored.
 - The `ControlPlane` contract, and how the NATS JetStream and etcd implementations meet it: keys, versions, leases and watches.
 - What the datacenter controller does: registration, heartbeats, the refresh and watch loops with their backoff, and the cache of active datacenters with its tombstones.
-- Which node runs the controller, which call sites start and stop it, and what readiness reports.
-- How `SpawnOn` with `WithDataCenter`, name lookup in `SendAsync` and `SendSync`, and grain messaging reach another datacenter, and what each does with a stale cache.
+- Which node runs the controller (the cluster leader, [Chapter 20, §20.8](chap-20.md#208-peers-members-and-the-leader)), which call sites start and stop it ([Chapter 3, §3.3](chap-03.md#33-start)), and what readiness reports.
+- How `SpawnOn` with `WithDataCenter` ([Chapter 21, §21.1](chap-21.md#211-placement-with-spawnon)), name lookup in `SendAsync` and `SendSync` ([Chapter 5, §5.8](chap-05.md#58-sending-by-name)), and grain messaging ([Chapter 13, §13.4](chap-13.md#134-finding-a-grain)) reach another datacenter, and what each does with a stale cache.
 
 ## 22.1 One cluster per datacenter
 
-Each datacenter runs an independent GoAkt cluster, with its own discovery provider, membership and registry. **Nothing in the registry is shared between datacenters.** What links them is a control plane: an external store (NATS JetStream or etcd) that holds one record per datacenter, with the datacenter's identity, the remoting addresses of its nodes, a state and a leased liveness. In each cluster, the leader runs a datacenter controller that writes its own datacenter's record and caches the active records of every datacenter ([§22.7](#227-the-datacenter-controller) and [§22.8](#228-the-cache-of-active-datacenters)). [§22.9](#229-the-actor-systems-side) describes when the actor system creates that controller and how long its background loops run, which is less than the controller's design suggests. Cross-datacenter traffic is ordinary remoting ([Chapter 15](chap-15.md)) to the addresses in those records.
+Each datacenter runs an independent GoAkt cluster, with its own discovery provider and membership ([Chapter 19](chap-19.md)) and its own registry ([Chapter 20, §20.4](chap-20.md#204-the-registry)). **Nothing in the registry is shared between datacenters.** What links them is a control plane: an external store (NATS JetStream or etcd) that holds one record per datacenter, with the datacenter's identity, the remoting addresses of its nodes, a state and a leased liveness. In each cluster, the leader ([Chapter 20, §20.8](chap-20.md#208-peers-members-and-the-leader)) runs a datacenter controller that writes its own datacenter's record and caches the active records of every datacenter ([§22.7](#227-the-datacenter-controller) and [§22.8](#228-the-cache-of-active-datacenters)). [§22.9](#229-the-actor-systems-side) describes when the actor system creates that controller and how long its background loops run, which is less than the controller's design suggests. Cross-datacenter traffic is ordinary remoting ([Chapter 15](chap-15.md)) to the addresses in those records.
 
 ```mermaid
 flowchart TB
@@ -52,19 +52,19 @@ flowchart TB
 
 | Layer | Mechanisms | Scope |
 |---|---|---|
-| Within a datacenter | discovery, membership, the registry, placement, relocation, singletons, the topic actor | the nodes of one cluster |
+| Within a datacenter | discovery and membership ([Chapter 19](chap-19.md)), the registry ([Chapter 20](chap-20.md)), placement, relocation and singletons ([Chapter 21](chap-21.md)), the topic actor ([Chapter 11](chap-11.md)) | the nodes of one cluster |
 | Across datacenters | control-plane records, the controller's cache, remoting to record endpoints | all active datacenters |
 
 Four operations cross datacenters:
 
 | Operation | Entry point | Section |
 |---|---|---|
-| Spawn in a named datacenter | `SpawnOn` with `WithDataCenter` | [§22.10](#2210-cross-datacenter-operations) |
-| Send to an actor by name that the local cluster does not know | `SendAsync`, `SendSync` | [§22.10](#2210-cross-datacenter-operations) |
-| Send to a grain that the local cluster does not know | `TellGrain`, `AskGrain` | [§22.10](#2210-cross-datacenter-operations) |
+| Spawn in a named datacenter ([Chapter 21, §21.1](chap-21.md#211-placement-with-spawnon)) | `SpawnOn` with `WithDataCenter` | [§22.10](#2210-cross-datacenter-operations) |
+| Send to an actor by name that the local cluster does not know ([Chapter 5, §5.8](chap-05.md#58-sending-by-name)) | `SendAsync`, `SendSync` | [§22.10](#2210-cross-datacenter-operations) |
+| Send to a grain that the local cluster does not know ([Chapter 13, §13.4](chap-13.md#134-finding-a-grain)) | `TellGrain`, `AskGrain` | [§22.10](#2210-cross-datacenter-operations) |
 | Replicate CRDTs | the Replicator's flush and anti-entropy | [Chapter 24, §24.9](chap-24.md#249-cluster-integration-and-multi-datacenter) |
 
-Cross-datacenter CRDT replication uses the same controller: the leader's Replicator reads the controller's active records and its stale-cache policy before each flush and each anti-entropy round, as [Chapter 24, §24.9](chap-24.md#249-cluster-integration-and-multi-datacenter) describes. `SpawnOn` without `WithDataCenter` places through `cluster.Members` and therefore stays inside the local datacenter (comment on `actorSystem.SpawnOn` in `actor/spawn.go`).
+Cross-datacenter CRDT replication uses the same controller: the leader's Replicator reads the controller's active records and its stale-cache policy before each flush and each anti-entropy round, as [Chapter 24, §24.9](chap-24.md#249-cluster-integration-and-multi-datacenter) describes. `SpawnOn` without `WithDataCenter` places through `cluster.Members` and therefore stays inside the local datacenter (comment on `actorSystem.SpawnOn` in `actor/spawn.go`; [Chapter 21, §21.1](chap-21.md#211-placement-with-spawnon)).
 
 ## 22.2 Records, states and wire format
 
@@ -74,7 +74,7 @@ Cross-datacenter CRDT replication uses the same controller: the leader's Replica
 
 | Field | Meaning |
 |---|---|
-| `ID` | stable identifier; the controller sets it to `DataCenter.ID` |
+| `ID` | stable identifier; the controller uses the stored record ID, else `DataCenter.ID`, else `DataCenter.Name` ([§22.7](#227-the-datacenter-controller)) |
 | `DataCenter` | the metadata above |
 | `Endpoints` | the advertised remoting addresses, `host:port`; the controller fills it with the remoting addresses of the cluster members ([§22.9](#229-the-actor-systems-side)) |
 | `State` | lifecycle state, below |
@@ -107,7 +107,7 @@ stateDiagram-v2
 
 ## 22.3 Configuration and validation
 
-Multi-datacenter is configured with a `Config` (`datacenter/config.go`) handed to `ClusterConfig.WithDataCenter` (`actor/cluster_config.go`). A nil config is ignored. Endpoints are not configured: the leader advertises the remoting addresses of its cluster's members ([§22.9](#229-the-actor-systems-side)).
+Multi-datacenter is configured with a `Config` (`datacenter/config.go`) handed to `ClusterConfig.WithDataCenter` (`actor/cluster_config.go`, [Chapter 20, §20.2](chap-20.md#202-configuration)). A nil config is ignored. Endpoints are not configured: the leader advertises the remoting addresses of its cluster's members ([§22.9](#229-the-actor-systems-side)).
 
 | Field | `NewConfig` | `Sanitize` fills a zero value with | `Validate` | Used by |
 |---|---|---|---|---|
@@ -117,8 +117,8 @@ Multi-datacenter is configured with a `Config` (`datacenter/config.go`) handed t
 | `CacheRefreshInterval` | 10 s | 10 s | > 0 | the refresh loop; base delay of watch re-establishment |
 | `MaxCacheStaleness` | 30 s | 30 s | > 0 | the stale flag of `Controller.ActiveRecords` |
 | `LeaderCheckInterval` | 5 s | 5 s | > 0 | the leader watch ticker, which never starts ([§22.9](#229-the-actor-systems-side)) |
-| `JitterRatio` | 0.1 | 0.1 | 0 to 0.5 | all periodic loops |
-| `MaxBackoff` | 30 s | 30 s | > 0 | all periodic loops |
+| `JitterRatio` | 0.1 | 0.1 | 0 to 0.5 | all periodic loops and watch re-establishment |
+| `MaxBackoff` | 30 s | 30 s | > 0 | all periodic loops and watch re-establishment |
 | `RequestTimeout` | 5 s | 5 s | > 0 | each control-plane call; cross-datacenter lookups and grain sends |
 | `WatchEnabled` | true | nothing | none | the watch loop |
 | `FailOnStaleCache` | true | nothing | none | every cross-datacenter operation |
@@ -126,7 +126,7 @@ Multi-datacenter is configured with a `Config` (`datacenter/config.go`) handed t
 
 `Sanitize` cannot tell a false boolean from an unset one, so `WatchEnabled` and `FailOnStaleCache` are true only in a config built by `NewConfig`. A `JitterRatio` of 0 is replaced by 0.1, so jitter cannot be switched off through a sanitized config.
 
-**Where validation runs.** `ClusterConfig.Validate` runs `Config.Validate` through a conditional validator when a datacenter config is set (`actor/cluster_config.go`), and `actorSystem.validate` calls `ClusterConfig.Validate` from `NewActorSystem` in cluster mode (`actor/actor_system.go`). `Sanitize` runs later, in `NewController` ([§22.7](#227-the-datacenter-controller)). A config built by hand with zero intervals therefore fails `NewActorSystem`; `NewConfig` gives one that passes once `ControlPlane` and `DataCenter.Name` are set.
+**Where validation runs.** `ClusterConfig.Validate` runs `Config.Validate` through a conditional validator when a datacenter config is set (`actor/cluster_config.go`), and `actorSystem.validate` calls `ClusterConfig.Validate` from `NewActorSystem` in cluster mode (`actor/actor_system.go`, [Chapter 3](chap-03.md)). `Sanitize` runs later, in `NewController` ([§22.7](#227-the-datacenter-controller)). A config built by hand with zero intervals therefore fails `NewActorSystem`; `NewConfig` gives one that passes once `ControlPlane` and `DataCenter.Name` are set.
 
 The control planes have their own configs ([§22.5](#225-the-nats-jetstream-control-plane), [§22.6](#226-the-etcd-control-plane)). Nothing checks that a control plane's TTL is longer than `HeartbeatInterval`.
 
@@ -168,9 +168,9 @@ Both shipped implementations follow the same scheme:
 
 **Construction.** `NewControlPlane` sanitizes and validates the config, connects with `ConnectTimeout`, and looks the bucket up. If it does not exist it creates it with `TTL` as the bucket TTL; if a concurrent creator won (`nats.ErrStreamNameAlreadyInUse`) it looks it up again. An existing bucket is used as it is, with whatever TTL it was created with. `Close` closes the connection and may be called twice.
 
-**Keys and values.** A record lives at `<id>.datacenterrecord` (`recordKey`, `recordSuffix`); keys without the suffix are ignored everywhere. The value is the encoded record; the version is the KV revision of the entry.
+**Keys and values.** A record lives at `<id>.datacenterrecord` (`recordKey`, `recordSuffix`); `ListActive` and `Watch` ignore keys without the suffix. The value is the encoded record; the version is the KV revision of the entry.
 
-**Liveness has two layers.** The bucket TTL ages every key, and each `Put` or `Update` resets the key's age (type comment). Independently, every write stores `LeaseExpiry = now + Config.TTL` in the record, and `ListActive` skips a record whose stored `LeaseExpiry` is not after the current time.
+**Liveness has two layers.** The bucket TTL ages every key, and each `Put` or `Update` resets the key's age (type comment). Independently, `Register` and `Heartbeat` store `LeaseExpiry = now + Config.TTL` in the record (`SetState` keeps the stored value), and `ListActive` skips a record whose stored `LeaseExpiry` is not after the current time.
 
 **Operations**, beyond the common scheme of [§22.4](#224-the-controlplane-contract):
 
@@ -178,7 +178,7 @@ Both shipped implementations follow the same scheme:
 - `Heartbeat` decodes the stored record, sets a new `LeaseExpiry`, and `Update`s at the version, returning the new revision and the new expiry.
 - `SetState` decodes, changes the state, and `Update`s at the version.
 - `ListActive` lists the keys, reads each record key, skips deleted entries and entries whose operation is not a put, decodes (a decoding error fails the whole call), keeps active records with a future `LeaseExpiry`, sets each version to the entry's revision, and sorts.
-- `Watch` opens a KV watch on all keys bound to the context and translates entries on a goroutine into an unbuffered channel. Nil entries and non-record keys are skipped. A put becomes an upsert carrying the decoded record with the entry's revision; a put whose value fails to decode is dropped. A delete or purge becomes a delete carrying the ID parsed from the key and, only when the entry has a value, the decoded record and its revision (`ControlPlane.toControlPlaneEvent`). The KV `Delete` and `Purge` calls write a marker with an empty value, so the delete events this provider produces carry the ID and version 0, which the controller's cache does not apply against a cached record ([§22.8](#228-the-cache-of-active-datacenters)). The channel closes when the context ends or the watcher's update channel closes.
+- `Watch` opens a KV watch on all keys bound to the context and translates entries on a goroutine into an unbuffered channel. Nil entries and non-record keys are skipped. A put becomes an upsert carrying the decoded record with the entry's revision; a put whose value fails to decode is dropped. A delete or purge becomes a delete carrying the ID parsed from the key and, only when the entry has a value, the decoded record and its revision (`ControlPlane.toControlPlaneEvent`). The JetStream KV `Delete` and `Purge` calls write a marker with an empty value, so the delete events this provider produces carry the ID and version 0, which the controller's cache does not apply against a cached record ([§22.8](#228-the-cache-of-active-datacenters)). The channel closes when the context ends or the watcher's update channel closes.
 - `Deregister` deletes the key; a missing or already deleted key is success.
 
 **Contexts.** `Register`, `Heartbeat`, `SetState`, `ListActive` and `Deregister` ignore their context parameter, and no operation reads `Config.Timeout` or `Config.Context`; only `Watch` uses its context. The controller's `RequestTimeout` therefore does not bound those calls on this provider.
@@ -258,7 +258,7 @@ The loop exits whenever the context ends.
 
 **Stop.** `Controller.Stop`, under `lifecycleMu`:
 
-1. Returns nil if not started, then marks itself not started.
+1. Returns nil if not started; otherwise marks itself not started.
 2. Cancels the context and waits for the loops to end.
 3. Returns nil if no record was ever registered.
 4. Sets the record `DRAINING` at the stored version. `ErrDataCenterRecordNotFound` resets the cache and returns nil; any other error is returned.
@@ -283,7 +283,7 @@ The version checks of steps 4 and 5 mean that a controller whose stored version 
 |---|---|---|
 | `recordCache.replace` | a refresh without an established watch | builds a new map from the active records that pass the version rule, clears their tombstones, discards every other cached record, stamps the refresh time |
 | `recordCache.merge` | a refresh while a watch is established | adds or updates the active records that pass the version rule, clears their tombstones, never removes a record, stamps the refresh time |
-| `recordCache.apply` | each watch event | turns an upsert of a record that is not active into a delete; if the version rule passes, a delete removes the record and, for a version above 0, records a tombstone at that version, and an upsert stores the record and clears its tombstone; stamps the refresh time |
+| `recordCache.apply` | each watch event | turns an upsert of a record that is not active into a delete; ignores an event with an empty ID or one that fails the version rule; otherwise a delete removes the record and, for a version above 0, records a tombstone at that version, and an upsert stores the record and clears its tombstone, and the refresh time is stamped |
 | `recordCache.reset` | `Controller.Stop` | empties both maps and zeroes the refresh time |
 
 Two consequences of these rules:
@@ -303,7 +303,7 @@ The actor system holds at most one controller, in the `dataCenterController` fie
 
 1. Returns nil while the system is stopping, or when multi-datacenter is not enabled.
 2. Returns nil if another reconciliation is in flight (`dataCenterReconcileInFlight`, a compare-and-swap); the flag is cleared on return.
-3. Asks `cluster.IsLeader` (`internal/cluster/cluster.go`), then takes `dataCenterControllerMutex`.
+3. Asks `cluster.IsLeader` (`internal/cluster/cluster.go`, [Chapter 20, §20.8](chap-20.md#208-peers-members-and-the-leader)), then takes `dataCenterControllerMutex`.
 4. **Not the leader**: stops a running controller and clears the field (`actorSystem.stopControllerLocked`). The comment gives the reason: followers must not run it, to avoid multiple writers and conflicting heartbeats in the control plane, and a node that lost leadership must stop being a writer. If `Stop` fails, the error is returned and the field is kept.
 5. **The leader, with a controller**: updates the endpoints if membership changed (`actorSystem.maybeUpdateEndpoints`).
 6. **The leader, without one**: builds the endpoints from `cluster.Members`, one `Peer.RemotingAddress` (`internal/cluster/peer.go`) per member, creates the controller with `NewController`, starts it with the context it was given, and stores it.
@@ -315,7 +315,7 @@ The actor system holds at most one controller, in the `dataCenterController` fie
 | Call site | When | Context given to `startDataCenterController` |
 |---|---|---|
 | the startup chain of `actorSystem.Start` | once, after `startCluster` | the `Start` context |
-| `triggerDataCentersReconciliation`, from `handleNodeJoinedEvent` and `handleNodeLeftEvent` in `actor/actor_system.go` | on every `NodeJoined` and `NodeLeft` event this node handles; `LeaderChanged` triggers nothing | a new context from `context.Background`, bounded by `shutdownTimeout` and cancelled by a deferred `cancel` when `startDataCenterController` returns |
+| `triggerDataCentersReconciliation`, from `handleNodeJoinedEvent` and `handleNodeLeftEvent` in `actor/actor_system.go` | on every `NodeJoined` and `NodeLeft` event this node handles ([Chapter 20, §20.9](chap-20.md#209-cluster-events)); `LeaderChanged` triggers nothing | a new context from `context.Background`, bounded by `shutdownTimeout` and cancelled by a deferred `cancel` when `startDataCenterController` returns |
 | `dataCenterLeaderWatchLoop`, through `triggerDataCentersReconciliation` | on every tick of a `LeaderCheckInterval` ticker | as above |
 
 `triggerDataCentersReconciliation` does nothing while the system stops or while a reconciliation is in flight, and otherwise runs `startDataCenterController` on a new goroutine, logging its error. A trigger that finds a reconciliation in flight is dropped, not queued.
@@ -355,6 +355,7 @@ sequenceDiagram
         AS->>Cl: Members
         AS->>DC: UpdateEndpoints, if the list changed
     end
+    Note over AS,DC: when the reconciliation returns, its deferred cancel<br/>ends the context the controller's loops run under
 ```
 
 **The leader watch, as written.** If it were started, `startDataCenterLeaderWatch` would create one ticker of `LeaderCheckInterval` and a one-slot stop channel, under `dataCenterLeaderMutex`, and run `dataCenterLeaderWatchLoop`, which triggers a reconciliation on each tick and exits on the stop signal or when its context ends; a second call while a ticker exists would do nothing. `stopDataCenterLeaderWatch`, which shutdown calls whether or not a ticker exists, stops the ticker, clears both fields and sends the stop signal without blocking.
@@ -370,7 +371,7 @@ sequenceDiagram
 
 "Not enabled" includes a system that is not running, so `DataCenterReady` is true before `Start` and after `Stop`. The interface comment on `DataCenterReady` in `actor/actor_system.go` intends it for readiness probes and notes that it does not guarantee a fresh cache; freshness is the stale flag of `ActiveRecords`.
 
-**Followers.** Every cross-datacenter path reads the controller through `getDataCenterController`, and a node that is not the leader has none: `DataCenterReady` is false, and the operations of [§22.10](#2210-cross-datacenter-operations) take their "no controller" branch. `SpawnOn` with `WithDataCenter` fails with `ErrDataCenterNotReady`, `SendAsync` and `SendSync` return `ErrActorNotFound` for a name the local cluster does not know, and `TellGrain` and `AskGrain` activate an unknown grain on the local node. The Replicator checks leadership itself and does nothing cross-datacenter on a follower ([Chapter 24, §24.9](chap-24.md#249-cluster-integration-and-multi-datacenter)). The one exception is a node whose controller `Stop` failed when it lost leadership: it keeps the stopped controller until a later reconciliation's `Stop`, now a no-op, clears the field. Meanwhile `Ready` is false, but name lookups and grain sends still read the controller's last cache.
+**Followers.** Every cross-datacenter path reads the controller through `getDataCenterController`, and a node that is not the leader has none: `DataCenterReady` is false, and the operations of [§22.10](#2210-cross-datacenter-operations) take their "no controller" branch. `SpawnOn` with `WithDataCenter` fails with `ErrDataCenterNotReady`, `SendAsync` and `SendSync` return `ErrActorNotFound` for a name the local cluster does not know, and `TellGrain` and `AskGrain` activate an unknown grain on the local node ([Chapter 13, §13.4](chap-13.md#134-finding-a-grain)). The Replicator checks leadership itself and does nothing cross-datacenter on a follower ([Chapter 24, §24.9](chap-24.md#249-cluster-integration-and-multi-datacenter)). The one exception is a node whose controller `Stop` failed when it lost leadership: it keeps the stopped controller until a later reconciliation's `Stop`, now a no-op, clears the field. Meanwhile `Ready` is false, but name lookups and grain sends still read the controller's last cache.
 
 ## 22.10 Cross-datacenter operations
 
@@ -389,18 +390,18 @@ For grains, every error from the cross-datacenter step, the stale error included
 
 `actorSystem.SpawnOn` (`actor/spawn.go`) returns `ErrActorSystemNotStarted` on a system that is not running, then rejects a reliable-delivery endpoint combined with `WithDataCenter`, because the endpoint's controller pair and the registry live in the local cluster (comment in `SpawnOn`; [Chapter 23](chap-23.md)). With a datacenter set, it skips the local preconditions and placement and calls `actorSystem.spawnOnDatacenter`:
 
-1. `DataCenterReady` must be true, else `ErrDataCenterNotReady`.
+1. `DataCenterReady` must be true, else `ErrDataCenterNotReady`. On a system where multi-datacenter is not enabled `DataCenterReady` is true and there is no controller; the next step then calls `ActiveRecords` on that absent controller, whose methods do not check for nil.
 2. Reads the active records and applies the stale policy above.
 3. Finds the record whose state is active and whose ID equals the target's `DataCenter.ID`, else `ErrDataCenterRecordNotFound`. Zone, region and name must therefore all match what the target registered.
 4. Picks one of its endpoints uniformly at random and splits it into host and port; a malformed endpoint is an error.
-5. Sends `RemoteSpawn` ([Chapter 16](chap-16.md)) with a `SpawnRequest` (`remote/spawn_request.go`) carrying the name, the actor's registered kind, `Relocatable`, the passivation strategy, the dependencies, stashing, reentrancy and the init timeout. The supervisor, role and mailbox options are not carried. The kind must be registered on the target node, else the remote error, typically `ErrTypeNotRegistered`, is returned.
+5. Sends `RemoteSpawn` ([Chapter 16](chap-16.md)) with a `SpawnRequest` (`remote/spawn_request.go`) carrying the name, the actor's registered kind, `Relocatable`, the passivation strategy, the dependencies, stashing, reentrancy, the init timeout and the dispatcher name (a dispatcher declared on the target node, [Chapter 7, §7.1](chap-07.md#71-the-pieces)). The supervisor, role and mailbox options are not carried. The kind must be registered on the target node, else the remote error, typically `ErrTypeNotRegistered`, is returned.
 6. Returns a remote PID for the address the target returned.
 
-Which node runs the actor depends only on the endpoints the target datacenter advertised; with a leader that advertises every member, it is a random member (comment on `actorSystem.spawnOnDatacenter`). The target node handles the request like any remote spawn ([Chapter 17](chap-17.md)).
+Which node runs the actor depends only on the endpoints the target datacenter advertised; with a leader that advertises every member, it is a random member (comment on `actorSystem.spawnOnDatacenter`). The target node handles the request like any remote spawn ([Chapter 17, §17.6](chap-17.md#176-actor-lifecycle-and-query-handlers)); the spawn options are in [Chapter 4](chap-04.md).
 
 ### Sending by name
 
-`PID.SendAsync` and `PID.SendSync` (`actor/pid.go`) resolve the name in the local datacenter first, through the relocation handoff helpers ([Chapter 5, §5.8](chap-05.md#58-sending-by-name)). **Only `ErrActorNotFound` falls through** to the other datacenters; any other error is returned. They then call `PID.DiscoverActor` with a timeout of `RequestTimeout` (5 s without a datacenter config); `SendSync` lowers it to its own timeout when that is positive and smaller. On success they `Tell` or `Ask` the remote PID found. `ReceiveContext.SendAsync` and `ReceiveContext.SendSync` (`actor/receive_context.go`) delegate to these methods.
+`PID.SendAsync` and `PID.SendSync` (`actor/pid.go`) resolve the name in the local datacenter first ([Chapter 5, §5.8](chap-05.md#58-sending-by-name)): `SendAsync` through `PID.deliverBypassingHandoff`, which fails fast with `ErrRelocationInProgress` for a target in its handoff window, and `SendSync` through `PID.deliverAcrossHandoff` (`actor/relocation_handoff.go`, [Chapter 21, §21.12](chap-21.md#2112-the-handoff-window)). **Only `ErrActorNotFound` falls through** to the other datacenters; any other error is returned. They then call `PID.DiscoverActor` with a timeout of `RequestTimeout` (5 s without a datacenter config); `SendSync` lowers it to its own timeout when that is positive and smaller. On success they `Tell` or `Ask` the remote PID found. `ReceiveContext.SendAsync` and `ReceiveContext.SendSync` (`actor/receive_context.go`, [Chapter 8](chap-08.md)) delegate to these methods.
 
 `DiscoverActor`, in order:
 
@@ -415,7 +416,7 @@ On the remote node, `actorSystem.remoteLookupHandler` (`actor/remote_server.go`)
 
 ### Grains
 
-In cluster mode, `actorSystem.remoteTellGrain` and `actorSystem.remoteAskGrain` (`actor/grain_engine.go`) deliver to a grain active on this node, then consult the local registry, and only on `cluster.ErrGrainNotFound` try the other datacenters before activating the grain locally ([Chapter 14](chap-14.md) describes the grain runtime). Any other registry error is returned.
+In cluster mode, `actorSystem.remoteTellGrain` and `actorSystem.remoteAskGrain` (`actor/grain_engine.go`) deliver to a grain active on this node, then consult the local registry, and only on `cluster.ErrGrainNotFound` try the other datacenters before activating the grain locally ([Chapter 13, §13.4](chap-13.md#134-finding-a-grain) describes the lookup, [Chapter 14, §14.12](chap-14.md#1412-delivery-from-another-node) the delivery from another node). Any other registry error is returned.
 
 `tellGrainAcrossDataCenters` does not look the grain up; it **sends the message itself** to every endpoint of every active record, the local datacenter's included, concurrently, with `RemoteTellGrain`, or `RemoteTellGrainOneWay` for a one-way tell. The `GrainRequest` carries only the grain's name and kind. The shared context is bounded by `RequestTimeout`, lowered to the timeout passed in when that is positive and smaller; `TellGrain` passes `DefaultGrainRequestTimeout` (5 s, `actor/defaults.go`), `AskGrain` the caller's timeout. Malformed endpoints are skipped. The first send that succeeds returns nil and cancels the shared context; if none succeeds, the result is `ErrActorNotFound`. `askGrainAcrossDataCenters` does the same with `RemoteAskGrain`, passing the caller's timeout, and returns the first response that is not nil; a nil response without an error counts as a failure.
 
@@ -489,6 +490,9 @@ If the cross-datacenter step returns any error, `remoteTellGrain` and `remoteAsk
 | `WatchEnabled` and `FailOnStaleCache` are true only through `NewConfig`; a zero `JitterRatio` becomes 0.1 | `NewConfig` and `Config.Sanitize` in `datacenter/config.go` |
 | Endpoint lists are compared in order, so the same members in another order trigger a re-registration | `actorSystem.maybeUpdateEndpoints` in `actor/data_center_controller.go` |
 | A cross-datacenter spawn does not carry the supervisor, role or mailbox options | `actorSystem.spawnOnDatacenter` in `actor/spawn.go` |
+| `SpawnOn` with `WithDataCenter` on a system where multi-datacenter is not enabled passes the `DataCenterReady` check and then calls `Controller.ActiveRecords` on a nil controller, which does not check for nil | `actorSystem.spawnOnDatacenter` in `actor/spawn.go`; `Controller.ActiveRecords` in `internal/datacentercontroller/controller.go` |
+| `SendAsync` fails fast with `ErrRelocationInProgress` for a local-datacenter target in its handoff window, while `SendSync` waits across the window ([Chapter 21, §21.12](chap-21.md#2112-the-handoff-window)) | `PID.SendAsync` and `PID.SendSync` in `actor/pid.go` |
+| A NATS `SetState` rewrites the record without renewing its stored `LeaseExpiry`; only `Register` and `Heartbeat` set it | `ControlPlane.SetState` in `datacenter/controlplane/nats/control_plane.go` |
 | Name lookup and grain sends query the local datacenter's own endpoints too | `PID.DiscoverActor` in `actor/pid.go`; `actorSystem.tellGrainAcrossDataCenters` in `actor/grain_engine.go` |
 | With `FailOnStaleCache`, a stale cache makes `SendAsync` and `SendSync` return `ErrDataCenterStaleRecords` for a name the local cluster does not know | `PID.DiscoverActor` in `actor/pid.go` |
 | A stale cache does not fail a grain send: every error of the cross-datacenter step, the stale error included, leads to local activation | `actorSystem.remoteTellGrain` and `actorSystem.remoteAskGrain` in `actor/grain_engine.go` |

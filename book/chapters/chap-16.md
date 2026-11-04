@@ -36,14 +36,14 @@
 
 `internal/remoteclient` is the outbound half of remoting: everything a node does to reach another node goes through one `Client` (`Client` in `internal/remoteclient/client.go`). [Chapter 15](chap-15.md) describes the transport underneath it; [Chapter 17](chap-17.md) describes the server that answers it and the public `remote` package that configures it.
 
-An actor system builds its client in the first step of its startup chain, whether or not remoting is enabled, and every PID it constructs holds it ([Chapter 3, §3.3](chap-03.md#33-start); `actorSystem.setupRemoting` in `actor/actor_system.go`). The implementation is the unexported `client` type; `NewClient` returns it behind the interface.
+An actor system builds its client in the first step of its startup chain, whether or not remoting is enabled, and every PID it constructs holds it ([Chapter 3, §3.3](chap-03.md#33-start); [Chapter 4, §4.3](chap-04.md#43-inside-newpid); `actorSystem.setupRemoting` in `actor/actor_system.go`). The implementation is the unexported `client` type; `NewClient` returns it behind the interface.
 
 The interface has three kinds of operation:
 
 | Kind | Operations | Path |
 |---|---|---|
-| User messages | `RemoteTell`, `RemoteAsk`, `RemoteBatchTell`, `RemoteBatchAsk` | User lanes, the coalescer, the tell pump ([§16.6](#166-routing-which-lane-a-call-takes) to [§16.8](#168-the-coalescer)) |
-| Control requests | `RemoteLookup`, `GetReliableCompanion`, `RemoteSpawn`, `RemoteSpawnChild`, `RemoteReSpawn`, `RemoteStop`, `RemoteReinstate`, `RemoteWatch`, `RemoteUnWatch`, the queries `RemoteRole`, `RemoteStashSize`, `RemoteMetric`, `RemoteChildren`, `RemoteState`, `RemotePassivationStrategy`, `RemoteDependencies`, `RemoteParent`, `RemoteKind`, the grain calls `RemoteActivateGrain`, `RemoteTellGrain`, `RemoteTellGrainOneWay`, `RemoteAskGrain`, and the cluster calls `RelocateBatch`, `PersistPeerState` | `client.sendControl` in `internal/remoteclient/send.go` ([§16.9](#169-sending-an-ask-and-a-control-request)) |
+| User messages ([Chapter 5](chap-05.md)) | `RemoteTell`, `RemoteAsk`, `RemoteBatchTell`, `RemoteBatchAsk` | User lanes, the coalescer, the tell pump ([§16.6](#166-routing-which-lane-a-call-takes) to [§16.8](#168-the-coalescer)) |
+| Control requests | `RemoteLookup`, `GetReliableCompanion`, `RemoteSpawn`, `RemoteSpawnChild`, `RemoteReSpawn` ([Chapter 4](chap-04.md)), `RemoteStop`, `RemoteReinstate` ([Chapter 9, §9.7](chap-09.md#97-reinstate)), `RemoteWatch`, `RemoteUnWatch` ([Chapter 9, §9.9](chap-09.md#99-remote-watch)), the queries `RemoteRole`, `RemoteStashSize`, `RemoteMetric`, `RemoteChildren`, `RemoteState`, `RemotePassivationStrategy`, `RemoteDependencies`, `RemoteParent`, `RemoteKind`, the grain calls `RemoteActivateGrain`, `RemoteTellGrain`, `RemoteTellGrainOneWay`, `RemoteAskGrain` ([Chapter 14, §14.12](chap-14.md#1412-delivery-from-another-node)), and the cluster calls `RelocateBatch`, `PersistPeerState` ([Chapter 21, §21.8](chap-21.md#218-graceful-leave-the-peer-state-snapshot)) | `client.sendControl` in `internal/remoteclient/send.go` ([§16.9](#169-sending-an-ask-and-a-control-request)) |
 | Plumbing | `NetClient`, `Close`, `ClosePeer`, `Compression`, `TLSConfig`, `Serializer` | Local only |
 
 **Every control request has the same shape** (for example `client.RemoteKind` in `internal/remoteclient/client.go`). In order:
@@ -53,13 +53,15 @@ The interface has three kinds of operation:
 3. Build the internal protobuf request and send it with `client.sendControl`.
 4. Turn an `internalpb.Error` answer into a Go error with `checkProtoError` ([§16.11](#1611-errors)), then, for an operation that returns a value, check the answer's type. `RemoteActivateGrain`, `RemoteTellGrain` and `RemoteTellGrainOneWay` check only for an error.
 
+`RemoteSpawn`, `RemoteSpawnChild` and every grain request (`getGrainFromRequest` in `internal/remoteclient/client.go`) copy the request's named dispatcher onto the wire only when it is set; [Chapter 7](chap-07.md) covers dispatchers.
+
 The grain calls are control requests too: `RemoteTellGrain` sends a `RemoteTellGrainRequest` and waits for the answer, which the remote node sends after the grain has handled the message; `RemoteTellGrainOneWay` sets the request's one-way flag, so the node answers once the message is enqueued (`client.remoteTellGrain` in `internal/remoteclient/client.go`). How the grain engine uses them is [Chapter 14](chap-14.md)'s subject.
 
 ## 16.2 Construction and configuration
 
 `NewClient` (`internal/remoteclient/client.go`) fills in defaults, registers the protobuf serializer for every `proto.Message`, applies the options in order, then:
 
-- installs one TLS session cache (32 entries) on the stored TLS configuration when it has none, so every per-dial clone resumes sessions;
+- installs one TLS session cache ([Chapter 18, §18.2](chap-18.md#182-where-tls-is-applied)) (32 entries) on the stored TLS configuration when it has none, so every per-dial clone resumes sessions;
 - builds the composite deserializer once ([§16.3](#163-serializers));
 - sets the factory for legacy net clients.
 
@@ -79,16 +81,16 @@ The grain calls are control requests too: `RemoteTellGrain` sends a `RemoteTellG
 | Frame, message, chunk, credit and large-transfer limits | as in [Chapter 15, §15.10](chap-15.md#1510-semantics-defaults-and-invariants) | `WithClientMaxFrameSize`, `WithClientMaxMessageSize`, `WithClientChunkSize`, `WithClientInitialCredits`, `WithClientMaxConcurrentLargeTransfers` | HELLO; admission caps |
 | Context propagator | none | `WithClientContextPropagator` | [§16.10](#1610-context-metadata-and-deadlines) |
 | Send coalescing | off | `WithSendCoalescing` | [§16.8](#168-the-coalescer) |
-| Tell-failure handler | none | `WithTellFailureHandler` | [§16.7](#167-sending-a-tell), [§16.8](#168-the-coalescer) |
-| Dependency registry | none | `WithDependencyRegistry` | `RemoteDependencies` |
+| Tell-failure handler | none | `WithTellFailureHandler` | Dead letters ([Chapter 5, §5.4](chap-05.md#54-dead-letters)); [§16.7](#167-sending-a-tell), [§16.8](#168-the-coalescer) |
+| Dependency registry | none | `WithDependencyRegistry` | `RemoteDependencies` ([Chapter 12, §12.2](chap-12.md#122-dependencies)) |
 
 `WithClientWriteTimeout`, `WithClientReadIdleTimeout`, `WithClientMaxFrameSize` and `WithClientInitialCredits` take any value, zero included; a zero write timeout removes the bound. The other numeric options ignore zero and negative values and keep the default.
 
-**What the actor system passes.** `actorSystem.setupRemoting` (`actor/actor_system.go`) copies every transport setting from `remote.Config`, registers the serializers of the system's own messages (`PoisonPill`, `Terminated`, the async request and response commands, and the five reliable-delivery commands), passes the dependency registry, the propagator and the TLS client configuration, and appends the user serializers from the configuration through `ClientSerializerOptions` (`internal/remoteclient/config.go`). That helper skips the `proto.Message` entry, because `NewClient` already registers it. Last, it starts the failure drain and turns on coalescing with a batch of 256 (`remoteSendCoalescingMaxBatch` in `actor/defaults.go`) and the handler `actorSystem.enqueueCoalescedFailure` (`actor/remote_server.go`). Coalescing is therefore always on inside an actor system and is not a field of `remote.Config`; a client built directly with `NewClient` has it off.
+**What the actor system passes.** `actorSystem.setupRemoting` (`actor/actor_system.go`) copies every transport setting from `remote.Config` ([Chapter 17, §17.1](chap-17.md#171-the-remote-package)), registers the serializers ([Chapter 17, §17.2](chap-17.md#172-serializers)) of the system's own messages (`PoisonPill`, `Terminated` ([Chapter 9, §9.8](chap-09.md#98-death-watch)), the async request and response commands, and the five reliable-delivery commands of [Chapter 23](chap-23.md)), passes the dependency registry ([Chapter 12, §12.2](chap-12.md#122-dependencies)), the propagator and the TLS client configuration, and appends the user serializers from the configuration through `ClientSerializerOptions` (`internal/remoteclient/config.go`). That helper skips the `proto.Message` entry, because `NewClient` already registers it, and walks the configuration's serializer map, so the user entries reach the client in map order. Last, it starts the failure drain and turns on coalescing with a batch of 256 (`remoteSendCoalescingMaxBatch` in `actor/defaults.go`) and the handler `actorSystem.enqueueCoalescedFailure` (`actor/remote_server.go`). Coalescing is therefore always on inside an actor system and is not a field of `remote.Config`; a client built directly with `NewClient` has it off.
 
 ## 16.3 Serializers
 
-The client keeps one ordered list of serializer entries, fixed once `NewClient` returns and read without a lock (`client.serializers` and `ifaceEntry` in `internal/remoteclient/client.go`). The `proto.Message` entry is first. `WithClientSerializers(msg, s)` appends an interface entry when `msg` is a typed nil pointer to an interface, and otherwise a concrete-type entry, which it also registers with `types.RegisterSerializerType`. A nil serializer is ignored.
+The client keeps one ordered list of serializer entries ([Chapter 17, §17.2](chap-17.md#172-serializers) describes the public side), fixed once `NewClient` returns and read without a lock (`client.serializers` and `ifaceEntry` in `internal/remoteclient/client.go`). The `proto.Message` entry is first. `WithClientSerializers(msg, s)` appends an interface entry when `msg` is a typed nil pointer to an interface, and otherwise a concrete-type entry, which it also registers with `types.RegisterSerializerType`. A nil serializer is ignored.
 
 **Send side.** `client.resolveSerializer` returns the first entry, in list order, whose interface the message implements or whose type equals the message's type, and `nil` when none does. Every send turns `nil` into `ErrInvalidMessage`. The serializer then decides the wire identity of the payload (`serializerWireID` in `internal/remoteclient/send.go`; the IDs are in [Chapter 15, §15.4](chap-15.md#154-the-wire-protocol)):
 
@@ -107,7 +109,7 @@ On the direct `RemoteTell` path and in `RemoteAsk`, a protobuf message with the 
 
 ## 16.4 Peers
 
-A `peer` holds everything the client knows about one `host:port` (`peer` in `internal/remoteclient/peer.go`): the protocol cache, the control lane, the ordinary lanes and the large lane, one in-flight dial marker per lane, a dial backoff per lane, the route cache, the tell pumps, a generation counter, a closed flag, a cancellable dial context, and the count of legacy sends in flight. One mutex guards all of it.
+A `peer` holds everything the client knows about one `host:port` (`peer` in `internal/remoteclient/peer.go`): the protocol cache, the control lane, the ordinary lanes and the large lane, one in-flight dial marker per lane, a dial backoff per lane, the route cache, the tell pumps, a generation counter, a closed flag, a cancellable dial context, and the count of legacy sends in flight. One mutex guards all of it except the queue of each tell pump, which has its own.
 
 `client.peerFor` creates the peer on first use, with a lock-free read and a double-checked creation under the client's `peersMu`. A peer is never removed except by `ClosePeer` and `Close`.
 
@@ -125,7 +127,7 @@ A `peer` holds everything the client knows about one `host:port` (`peer` in `int
 8. On success, drain legacy sends again when switching, then, under the mutex: discard the session if the generation changed; keep an open session another caller installed first; otherwise install it, mark the peer duplex and clear the lane's backoff.
 9. If the new session closed between the dial and its installation, retire it and dial once more; a second such death returns `errLaneClosedDuringDial`, so a peer whose sessions die at once cannot spin the loop.
 
-**The dial.** `peer.dialLane` builds a fresh TCP transport with the dial timeout, keep-alive and frame limit, wrapped by `remotingTransport`, which clones the TLS configuration per dial and puts the TLS connection under the framed connection before the handshake. Its `HELLO` advertises revision 4, the lane, the proposed codec (`compressionCodec`) and the client's four limits. The dial context is cancelled when the peer's dial context is, so closing the peer aborts a handshake in progress. The handshake itself is [Chapter 15, §15.4](chap-15.md#154-the-wire-protocol).
+**The dial.** `peer.dialLane` builds a fresh TCP transport with the dial timeout, keep-alive and frame limit, wrapped by `remotingTransport`, which clones the TLS configuration per dial and puts the TLS connection under the framed connection before the handshake. Its `HELLO` advertises revision 5 (`CapabilityRevisionTellBatch`), the lane, the proposed codec (`compressionCodec`) and the client's four limits. The dial context is cancelled when the peer's dial context is, so closing the peer aborts a handshake in progress. The handshake itself is [Chapter 15, §15.4](chap-15.md#154-the-wire-protocol).
 
 **Backoff.** A failed dial blocks the lane for one second, doubling on each further failure up to 30 seconds (`peer.recordDialFailure`; `maxLaneReconnectBackoff` in `internal/remoteclient/peer.go`). A successful dial of that lane, or closing the peer, clears it. A failure from a dial that a `ClosePeer` overtook records nothing, and neither does a cancelled or timed-out dial, including a connect timeout (step 7).
 
@@ -149,7 +151,7 @@ Retiring a lane clears the protocol cache only when it was the last lane (`peer.
 
 `peer.closeAllLanes` takes every session out, resets the route cache and the backoffs, clears the protocol cache, increments the generation, closes the pump stop channel once (so queued tells fan out, [§16.7](#167-sending-a-tell)), marks the peer closed, wakes every waiter on a dial, cancels the dial context, and closes the sessions in parallel outside the mutex.
 
-`ClosePeer(host, port)` calls it and removes the peer, so the next call creates a fresh peer. The actor system calls it when a node leaves the cluster (`actorSystem.handleNodeLeftEvent` in `actor/actor_system.go`). `Close` closes the coalescers first, so their last batches are flushed while the lanes are still up, then closes every peer and every legacy net client, and empties the three maps (`client.Close` in `internal/remoteclient/client.go`).
+`ClosePeer(host, port)` calls it and removes the peer, so the next call creates a fresh peer. The actor system calls it when a node leaves the cluster ([Chapter 21, §21.6](chap-21.md#216-what-every-node-does-on-nodeleft); `actorSystem.handleNodeLeftEvent` in `actor/actor_system.go`). `Close` closes the coalescers first, so their last batches are flushed while the lanes are still up, then closes every peer and every legacy net client, and empties the three maps (`client.Close` in `internal/remoteclient/client.go`).
 
 ### The route cache
 
@@ -167,9 +169,20 @@ Each peer classifies its endpoint as unknown, duplex or legacy, with the time of
 | The last lane is retired | unknown | `peer.clearCacheIfNoLanesLocked` |
 | The peer is closed | unknown | `peer.closeAllLanes` |
 
+```mermaid
+stateDiagram-v2
+    [*] --> Unknown
+    Unknown --> Duplex: a lane dial succeeds
+    Unknown --> Legacy: auto mode, EOF or reset before HELLO_ACK
+    Legacy --> Unknown: the next call, 30 s after the mark
+    Duplex --> Unknown: the last lane is retired
+    Duplex --> Unknown: the peer is closed
+    Legacy --> Unknown: the peer is closed
+```
+
 A refused connection and a timeout are not legacy failures: nothing listening proves neither protocol, and a timeout must reach the caller so a silent peer cannot dodge an ask deadline (the comment of `isLegacyHandshakeFailure`).
 
-**The pin** is the client side of `remote.ProtocolPin` (`ProtocolPinAuto` in `remote/protocol_pin.go`):
+**The pin** is the client side of `remote.ProtocolPin` ([Chapter 17, §17.1](chap-17.md#171-the-remote-package); `ProtocolPinAuto` in `remote/protocol_pin.go`):
 
 - **Legacy.** `client.pinRequiresLegacy` is checked on every path: `sendControl`, `sendTell`, `sendAsk`, the batch paths, the coalescer's flush, `tellSendPlan` and `ensureLane`. No lane is dialled and the cache stays unknown.
 - **Duplex.** A legacy handshake failure is returned as an error; the peer is never marked legacy.
@@ -232,7 +245,7 @@ flowchart TD
 - A peer found to be legacy during delivery gets the tell through the coalescer when coalescing is on, or through one legacy send (`peer.deliverAdmittedTellLegacy`).
 - After the peer is closed, the runner hands every queued tell to the failure handler instead of delivering it (`peer.drainPumpOnStop`).
 
-**The failure handler** receives the destination `host:port`, the messages and the cause. The client invokes it from the coalescer's writer, a pump runner or a sending goroutine, and it must not block (`TellFailureHandler` in `internal/remoteclient/coalescer.go`). The actor system's handler logs the failure and queues it, without blocking, on a 256-slot channel; one goroutine turns each message into a dead letter (`actorSystem.enqueueCoalescedFailure`, `actorSystem.drainCoalescedFailures` and `coalescedFailureQueueSize` in `actor/remote_server.go`). A full queue, or a system that is shutting down, drops the failure after logging it.
+**The failure handler** receives the destination `host:port`, the messages and the cause. The client invokes it from the coalescer's writer, a pump runner or a sending goroutine, and it must not block for long (`TellFailureHandler` in `internal/remoteclient/coalescer.go`). The actor system's handler logs the failure and queues it, without blocking, on a 256-slot channel; one goroutine turns each message into a dead letter ([Chapter 5, §5.4](chap-05.md#54-dead-letters)) (`actorSystem.enqueueCoalescedFailure`, `actorSystem.drainCoalescedFailures` and `coalescedFailureQueueSize` in `actor/remote_server.go`). A full queue, or a system that is shutting down, drops the failure after logging it.
 
 **Batch tells.** `client.RemoteBatchTell` skips `nil` entries, serializes each message, attaches one metadata blob to all of them, and calls `client.sendBatchTellDuplex`. With coalescing on and a receiver that is not large, every message is submitted in order to the receiver's coalescer shard, the one single tells use, so tells and batch tells to one receiver keep one order (`client.submitBatchTellCoalesced`). Otherwise, with the legacy pin the batch is one legacy request; without it each message takes the direct path, and if the peer turns out to be legacy part-way, only the remaining messages go as one legacy batch, because sending the whole batch again would deliver the first ones twice. Backpressure or cancellation can stop a batch after a prefix was accepted.
 
@@ -246,17 +259,17 @@ One coalescer exists per destination and ordinary lane (`client.getCoalescer` in
 - **Per-message context.** Each message carries its own headers, so a shared batch keeps every caller's trace.
 - **Order per receiver.** At most one writer drains a coalescer at a time, so messages keep their submission order.
 
-**Submit** (`coalescer.submit`). The cost of a message is its encoded size plus 6 bytes for its place in the batch (`coalescedMessageBytes`). Under the coalescer's one mutex, `coalescer.enqueue` admits the message when the queue, a ring of `4 × batch size` slots, has a free slot and the cost fits the budget, or when the coalescer holds no bytes at all, so one message larger than the budget still goes (`coalescer.admits`). In the same critical section it starts the writer when none runs, or wakes it when it lingers. A submit that finds room therefore takes one lock and touches no channel; the comment on `coalescer.submit` gives the reason: waiting on the caller's `ctx.Done()` locks that channel, and a context shared by many senders makes it one lock they all contend on. Without room the caller waits for a wakeup, its context, or the close. The wakeup comes when a flush returns bytes, or when the writer takes from a full queue; a waiter that is admitted passes the wakeup on, so one release admits every waiter that fits (`coalescer.signalSpace`). The bytes stay charged until the flush of the batch that carries them returns, so a stalled transport cannot free the budget merely because the writer took the messages out of the queue.
+**Submit** (`coalescer.submit`). The cost of a message is its encoded size plus 6 bytes for its place in the batch (`coalescedMessageBytes`). Under the coalescer's one mutex, `coalescer.enqueue` admits the message when the queue, a ring of `4 × batch size` slots, has a free slot and either the cost fits the budget or the coalescer holds no bytes at all, so one message larger than the budget still goes (`coalescer.admits`). In the same critical section it starts the writer when none runs, or wakes it when it lingers. A submit that finds room therefore takes one lock and touches neither its context nor the space channel (it sends on the `ready` channel only to wake a lingering writer); the comment on `coalescer.submit` gives the reason: waiting on the caller's `ctx.Done()` locks that channel, and a context shared by many senders makes it one lock they all contend on. Without room the caller waits for a wakeup, its context, or the close. The wakeup comes when a flush returns bytes, or when the writer takes from a full queue; a waiter that is admitted passes the wakeup on, so one release admits every waiter that fits (`coalescer.signalSpace`). The bytes stay charged until the flush of the batch that carries them returns, so a stalled transport cannot free the budget merely because the writer took the messages out of the queue.
 
 **The writer** (`coalescer.run`) is spawned on demand. It takes up to one batch of the oldest messages under one lock (`coalescer.take`), flushes it, and repeats while messages are waiting. When the queue is empty it marks itself lingering and parks for 10 ms (`coalescerLinger`) for the next message, then exits if nothing came, so an idle destination holds no goroutine; the comment's reason is that request-reply traffic then pays a channel wake per message instead of a goroutine start. The submit that finds the mark clears it and sends the wake.
 
 **A flush** (`coalescer.sendBatch`) wraps the batch in one `RemoteTellRequest`, gives it a context bounded by the flush timeout, and calls `client.flushTellBatch` (`internal/remoteclient/send.go`). For a duplex peer, `client.flushTellBatchDuplex` sends it on the lane, split in order when it is too large for the negotiated message limit ([Chapter 15, §15.5](chap-15.md#155-correlation-and-dispatch)), and retires the lane on a terminal transport error. At revision 5, `client.sendTellBatchFrames` registers each message's sender and receiver on the connection's path table and writes the batch layout of [Chapter 15, §15.4](chap-15.md#154-the-wire-protocol) straight into the frame, so an address costs a few bytes after its first use; it packs messages in order into frames under the limit, and a message above the limit ships alone. Below revision 5 the batch travels as one internal-protobuf `RemoteTellRequest`. For a legacy peer, `client.flushTellBatchLegacy` sends it as one unary request, all or nothing. A split flush stops at the first part that fails, and that part and every later one count as undelivered. On failure the flush reports which messages were not delivered, and only those, copied into a slice of their own, go to the failure handler, so a split batch whose first part arrived dead-letters each failed message exactly once.
 
-**Close** (`coalescer.close`) refuses new submits, lets a running writer drain until the queue is empty, or starts a final drain when none runs, and waits for it. A submit admits its message under the lock that close sets the closed flag under, and a message admitted before close always has a running writer that close waits for, so a message the coalescer accepted is always flushed or handed to the failure handler.
+**Close** (`coalescer.close`) refuses new submits, lets a running writer drain until the queue is empty, or starts a final drain when none runs, and waits for it. A submit admits its message under the lock that close sets the closed flag under, and a message admitted before close always has a running writer that close waits for, so a message the coalescer accepted is always flushed or, when a failure handler is set, handed to it on failure.
 
 ## 16.9 Sending an ask and a control request
 
-**`RemoteAsk`** (`client.RemoteAsk` in `internal/remoteclient/client.go`). In order:
+**`RemoteAsk`** (`client.RemoteAsk` in `internal/remoteclient/client.go`; the local ask path is [Chapter 5, §5.3](chap-05.md#53-how-a-reply-gets-back)). In order:
 
 1. Bound the context with the timeout: the earlier of the context's deadline and `now + timeout`; a timeout of zero or less adds nothing (`askContext`).
 2. Resolve the serializer and serialize (with the pool for a protobuf message).
@@ -278,7 +291,7 @@ One coalescer exists per destination and ordinary lane (`client.getCoalescer` in
 4. Sends with `Ask`, retiring the lane on a terminal failure.
 5. Decodes the answer (`decodeControlReply`): an `ERROR` frame becomes its Go error; a `REPLY` must use serializer ID 0 and is decoded through the protobuf registry.
 
-In auto mode, a legacy handshake failure retries the request once on the legacy path, and a peer marked legacy gets the legacy path directly. The client adds no deadline of its own to a control request: one made with a context without a deadline waits until the peer answers or the connection closes. `RemoteAskGrain` is the exception: it bounds its context with `askContext` like `RemoteAsk`, and when that deadline ends the call it joins `ErrRequestTimeout` to the error (`client.RemoteAskGrain` in `internal/remoteclient/client.go`).
+In auto mode, a legacy handshake failure retries the request once on the legacy path, and a peer marked legacy gets the legacy path directly. The client adds no deadline of its own to a control request: once admitted (admission waits at most the write timeout when the context has no deadline), one made with a context without a deadline waits until the peer answers or the connection closes. `RemoteAskGrain` is the exception: it bounds its context with `askContext` like `RemoteAsk`, and when that deadline ends the call it joins `ErrRequestTimeout` to the error (`client.RemoteAskGrain` in `internal/remoteclient/client.go`).
 
 ## 16.10 Context, metadata and deadlines
 
@@ -316,7 +329,7 @@ How each path carries it:
 
 The table is the client's decoding; which codes a server sends decides what a caller can actually get. `FAILED_PRECONDITION` carrying `ErrDead` comes only from the grain ask and tell handlers, through `grainSendError`. The actor ask handlers answer an actor that is not running with `INTERNAL_ERROR` and the text of `ErrRemoteSendFailure` wrapping `ErrDead`, which the client returns as a plain error with that text, so a remote actor ask never yields `ErrDead` under `errors.Is` (`actorSystem.grainSendError`, `actorSystem.remoteAskHandler` and `actorSystem.duplexRemoteAsk` in `actor/remote_server.go`).
 
-An error with the `refused` flag, which a node sets when it refused a grain message before any handler ran it, is wrapped with `Mark` (`internal/refusal/refusal.go`) so the grain engine knows the message did not run.
+An error with the `refused` flag, which a node sets when it refused a grain message before any handler ran it, is wrapped with `Mark` (`internal/refusal/refusal.go`) so the grain engine knows the message did not run ([Chapter 13, §13.7](chap-13.md#137-when-the-recorded-owner-is-gone)).
 
 Some operations treat `NOT_FOUND` as an answer rather than an error:
 
@@ -341,13 +354,13 @@ A remote PID is a `PID` with only an address, a path and the client set, plus it
 
 | Call | Client operation | Client used | Source |
 |---|---|---|---|
-| `Tell`, `Ask` to a remote PID | `RemoteTell`, `RemoteAsk`, with `NoSender` as sender | the target's | `Tell` and `Ask` in `actor/api.go` |
+| `Tell`, `Ask` ([Chapter 5, §5.1](chap-05.md#51-three-ways-to-send)) to a remote PID | `RemoteTell`, `RemoteAsk`, with `NoSender` as sender | the target's | `Tell` and `Ask` in `actor/api.go` |
 | `pid.Tell`, `pid.Ask` to a remote PID | `RemoteTell`, `RemoteAsk`, with `pid` as sender | the sender's | `PID.remoteTell` and `PID.remoteAsk` in `actor/pid.go` |
 | `pid.BatchTell`, `pid.BatchAsk` to a remote PID | `RemoteBatchTell`, `RemoteBatchAsk` | the sender's | `PID.BatchTell` and `PID.BatchAsk` in `actor/pid.go` |
 | `pid.RemoteLookup`, `pid.RemoteStop`, `pid.RemoteReSpawn` | same name | the caller's | `actor/pid.go` |
 | `Shutdown`, `Restart` on a remote PID | `RemoteStop`, `RemoteReSpawn` | the PID's | `PID.Shutdown` and `PID.Restart` in `actor/pid.go` |
-| `pid.Stop`, `pid.Watch`, `pid.UnWatch` with a remote target | `RemoteStop`, `RemoteWatch`, `RemoteUnWatch` | the target's, else the caller's | `PID.Stop`, `PID.Watch` and `PID.UnWatch` in `actor/pid.go` |
-| `pid.Reinstate`, `pid.ReinstateNamed` of a remote actor | `RemoteReinstate` | the caller's | `PID.Reinstate` and `PID.ReinstateNamed` in `actor/pid.go` |
+| `pid.Stop`, `pid.Watch`, `pid.UnWatch` ([Chapter 9, §9.9](chap-09.md#99-remote-watch)) with a remote target | `RemoteStop`, `RemoteWatch`, `RemoteUnWatch` | the target's, else the caller's | `PID.Stop`, `PID.Watch` and `PID.UnWatch` in `actor/pid.go` |
+| `pid.Reinstate`, `pid.ReinstateNamed` ([Chapter 9, §9.7](chap-09.md#97-reinstate)) of a remote actor | `RemoteReinstate` | the caller's | `PID.Reinstate` and `PID.ReinstateNamed` in `actor/pid.go` |
 | `SpawnChild` on a remote PID | `RemoteSpawnChild`, relocation disabled | the parent's | `PID.spawnChildRemote` in `actor/pid.go` |
 | `IsRunning`, `Kind`, `Children`, `Parent` and the other accessors of a remote PID | `RemoteState`, `RemoteKind`, `RemoteChildren`, `RemoteParent`, ... with `context.Background()`; `Metric` passes its caller's context | the PID's | `PID.IsRunning` and `PID.Metric` in `actor/pid.go` |
 
@@ -432,7 +445,7 @@ Elsewhere in the actor package the client serves spawning on another node ([Chap
 - The defaults of [§16.2](#162-construction-and-configuration); a TLS session cache of 32 entries.
 - The route cache of 8,192 receivers; lane backoff from one second to 30 seconds; the 30-second legacy re-probe.
 - At most two delivery attempts per admitted tell; the pump compacts its queue once at least 32 popped entries make up half of it.
-- Coalescer: a batch of 256 in an actor system, 64 when constructed with none; a channel of four batches; a byte budget equal to the credit window, 16 MiB when it is zero; a flush timeout equal to the write timeout, 5 s when that is zero; a 10 ms linger; a per-message cost of encoded size plus 6 bytes.
+- Coalescer: a batch of 256 in an actor system, 64 when constructed with none; a queue ring of four batches; a byte budget equal to the credit window, 16 MiB when it is zero; a flush timeout equal to the write timeout, 5 s when that is zero; a 10 ms linger; a per-message cost of encoded size plus 6 bytes.
 - At most 64 concurrent asks per `RemoteBatchAsk`; a 4 KiB margin when a batch is split.
 - The 256-slot failure queue and its one drain goroutine.
 - A fresh TCP transport per lane dial.
@@ -453,6 +466,7 @@ Elsewhere in the actor package the client serves spawning on another node ([Chap
 | Most accessors of a remote PID are calls made with `context.Background()`; the client adds no deadline, and an error reads as `false`, `""` or `nil` | `PID.IsRunning` in `actor/pid.go`; `client.sendControlDuplex` in `internal/remoteclient/send.go` |
 | `pid.Tell` to a remote PID uses the sender's client; package-level `Tell` uses the target's | `PID.Tell` in `actor/pid.go`; `Tell` in `actor/api.go` |
 | Serializer resolution is the first match in registration order and the `proto.Message` entry is first, so a serializer registered for a concrete protobuf type is never chosen on send | `client.resolveSerializer` in `internal/remoteclient/client.go` |
+| The user serializers of `remote.Config` are appended in the order of a map walk, so when two of them match one message, which one is chosen is not fixed | `ClientSerializerOptions` in `internal/remoteclient/config.go`; `Config.Serializers` in `remote/config.go` |
 | Propagated header keys travel as the propagator wrote them into the `http.Header`: one that uses `Header.Set` produces the canonical form (`x-trace-id` becomes `X-Trace-Id`). Only the first value of a key travels | `client.enrichContext` and `client.injectMessageMetadata` in `internal/remoteclient/client.go` |
 | A call that holds a peer while `ClosePeer` runs fails with "duplex lane closed during dial"; a tell in that position goes to the failure handler | `peer.ensureLane` and `peer.admitTellOrFanOut` in `internal/remoteclient/peer.go` |
 | `NetClient` returns the legacy client; a request sent through it ignores the protocol pin | `client.NetClient` in `internal/remoteclient/client.go` |

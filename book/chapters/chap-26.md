@@ -26,11 +26,11 @@
 - The circuit breaker's three states, what moves it between them, and why half-open recovery needs `minRequests` probes, not one.
 - How the rolling window of buckets counts outcomes and ages them out, and what each option does when it is invalid.
 - How `Execute` decides whether to run a call, what it records, and which errors and fallbacks a caller sees.
-- Where GoAkt uses the breaker (the `PipeTo` family) and what an open breaker actually stops.
+- Where GoAkt uses the breaker (the [`PipeTo`](chap-05.md#57-pipeto) family) and what an open breaker actually stops.
 - How the `memory` package reads total, free and used memory on each platform, what "free" means on each, and the one place GoAkt reads these figures.
-- How `TestKit`, `Probe`, `GrainProbe` and `MultiNodes` work inside, and the traps in using them.
+- How `TestKit`, `Probe`, `GrainProbe` and `MultiNodes` work inside, and the traps in using them. They build on the [actor system](chap-03.md), [grains](chap-13.md) and [clusters](chap-19.md).
 
-The three packages are independent of each other. `breaker` and `memory` are small leaf packages the actor system imports; `testkit` sits on top of the actor system and is never imported by it. How the repository's own test suite is organised is [Chapter 27](chap-27.md), Testing GoAkt.
+The three packages are independent of each other. `breaker` and `memory` are small leaf packages the actor system imports; `testkit` sits on top of the actor system ([Chapter 3](chap-03.md)) and is never imported by it. How the repository's own test suite is organised is [Chapter 27](chap-27.md), Testing GoAkt.
 
 ## 26.1 The circuit breaker's states
 
@@ -85,7 +85,7 @@ The window is a ring of `bucket` values, each holding a success count, a failure
 **Advancing.** Adding and snapshotting first move the window to the present (`bucketWindow.advanceLocked` in `breaker/bucket.go`). In order:
 
 1. If less than one bucket length has passed since `lastUpdate`, nothing moves.
-2. If a whole window or more has passed, every bucket is cleared and the window is realigned at the current time (`bucketWindow.hardResetLocked` in `breaker/bucket.go`).
+2. If `n` bucket lengths (a whole window) or more have passed, every bucket is cleared and the window is realigned at the current time (`bucketWindow.hardResetLocked` in `breaker/bucket.go`).
 3. Otherwise, for each whole bucket length that has passed, the cursor steps forward, `lastUpdate` grows by exactly one bucket length, and the bucket entered is cleared. Adding the bucket length rather than setting `lastUpdate` to now keeps the buckets aligned to their grid: after 1.5 bucket lengths, the cursor moves once and the remaining half bucket still counts towards the next step.
 
 Counts therefore expire a whole bucket at a time. A sample is dropped when the cursor comes back round to its bucket, `n` bucket lengths after that bucket started, so it stays in the totals for between `(n - 1)` and `n` bucket lengths depending on where in its bucket it landed.
@@ -112,6 +112,19 @@ Counts therefore expire a whole bucket at a time. A sample is dropped when the c
 | no error | anything | success | `fn`'s value; the fallback is not called |
 | an error, or a panic | `context.Canceled` | nothing | the fallback's result with `fn`'s error, or `fn`'s error |
 | an error, or a panic | anything else, deadline expiry included | failure | the fallback's result with `fn`'s error, or `fn`'s error |
+
+```mermaid
+flowchart TD
+    A["Execute(ctx, fn, fallback)"] --> B{"ctx.Err set?"}
+    B -- yes --> F1["fallback or error: ErrorTypeTimeout, nothing recorded"]
+    B -- no --> C{"tryAcquire allowed?"}
+    C -- no --> F2["fallback or error: ErrOpen, nothing recorded"]
+    C -- yes --> D["invoke fn, panic becomes ErrorTypePanic"]
+    D --> E{"outcome"}
+    E -- "no error" --> S["record success"]
+    E -- "error and ctx.Err is Canceled" --> N["record nothing, fallback or fn error"]
+    E -- "other error" --> X["record failure, fallback or fn error"]
+```
 
 The comment on `Execute` gives the reason for the second row: cancellation by the caller says nothing about the health of the protected resource, so it neither trips nor heals the breaker, whereas a deadline expiry counts as a failure.
 
@@ -148,7 +161,7 @@ All three moves go through `CircuitBreaker.transitionTo` in `breaker/breaker.go`
 | Sentinel | Type | Returned when | Also matches |
 |---|---|---|---|
 | `ErrOpen` | `ErrorTypeOpen` | the breaker is open, or half-open with every token taken | nothing else |
-| `ErrTimeout` | `ErrorTypeTimeout` | the context was done before `fn` ran (a fresh `*Error` from `contextError`, not the sentinel itself) | the context's error through `Unwrap`: `context.Canceled` or `context.DeadlineExceeded` |
+| `ErrTimeout` | `ErrorTypeTimeout` | the context was done before `fn` ran (the error returned is a fresh `*Error` from `contextError`, not the sentinel itself) | the returned error unwraps to the context's own error, `context.Canceled` or `context.DeadlineExceeded`; the sentinel itself unwraps to `context.DeadlineExceeded` |
 
 There is no sentinel for panics; check the `Type` of an `*Error` obtained with `errors.As`, or look for the `PanicError` cause. A deadline that expires while `fn` is running produces `fn`'s own error, typically `context.DeadlineExceeded`, which does not match `ErrTimeout`. `ErrOpen` always says `State: Open`, even when it rejects a call because the half-open tokens are taken.
 
@@ -174,9 +187,9 @@ The only user inside GoAkt is the `PipeTo` family, through `WithCircuitBreaker` 
 
 | Caller | Completion path | On a breaker error |
 |---|---|---|
-| `PID.PipeTo` in `actor/pid.go`, and `ReceiveContext.PipeTo` in `actor/receive_context.go` which calls it | `PID.handleCompletion` in `actor/pid.go` | dead letter |
+| `PID.PipeTo` in `actor/pid.go`, and `ReceiveContext.PipeTo` in `actor/receive_context.go` ([Chapter 8, §8.1](chap-08.md#81-one-object-per-message)) which calls it | `PID.handleCompletion` in `actor/pid.go` | [dead letter](chap-05.md#54-dead-letters) |
 | `PID.PipeToName` in `actor/pid.go`, and `ReceiveContext.PipeToName` in `actor/receive_context.go` and `GrainContext.PipeToActor` in `actor/grain_context.go` which call it | a goroutine in `PID.PipeToName` | dead letter |
-| `GrainContext.PipeToGrain` and `GrainContext.PipeToSelf` in `actor/grain_context.go` | `handleGrainCompletion` in `actor/grain_context.go` | a `StatusFailure` message to the target grain |
+| `GrainContext.PipeToGrain` and `GrainContext.PipeToSelf` in `actor/grain_context.go` ([Chapter 14, §14.4](chap-14.md#144-graincontext)) | `handleGrainCompletion` in `actor/grain_context.go` | a `StatusFailure` message to the target grain |
 
 Each path first starts the task with `New` in `internal/future/future.go`, which runs it on its own goroutine at once, and then calls `Execute` with a function that **awaits** the future. So:
 
@@ -209,27 +222,27 @@ Details that matter when changing these files:
 
 ## 26.10 Where the memory figures are used
 
-There is one call site: `actorSystem.Metric` in `actor/actor_system.go`. When the system is started, every call reads `Size`, `Free` and `Used` afresh and puts them in a `Metric`, readable through `Metric.MemorySize`, `Metric.MemoryAvailable` and `Metric.MemoryUsed` in `actor/metric.go`. Errors from `Size` and `Free` are ignored, so on an unsupported platform the two figures are 0. `Metric` returns `nil` when the system is not started.
+There is one call site: `actorSystem.Metric` in `actor/actor_system.go` ([Chapter 12, §12.3](chap-12.md#123-metric-snapshots)). When the system is started, every call reads `Size`, `Free` and `Used` afresh and puts them in a `Metric`, readable through `Metric.MemorySize`, `Metric.MemoryAvailable` and `Metric.MemoryUsed` in `actor/metric.go`. Errors from `Size` and `Free` are ignored, so on an unsupported platform the two figures are 0. `Metric` returns `nil` when the system is not started.
 
-The figures are informational only. **Nothing in the actor system decides anything from memory.** In particular, least-load placement does not: `actorSystem.selectPlacementPeer` in `actor/spawn.go` and `actorSystem.selectActivationPeer` in `actor/grain_engine.go` both call `actorSystem.leastLoadedPeer` in `actor/grain_engine.go`, which asks every candidate peer for its node metric and picks the lowest load; the peer answers in `actorSystem.getNodeMetricHandler` in `actor/remote_server.go` with its number of actors plus its number of grains. Placement is [Chapter 21](chap-21.md), Placement, Singletons and Relocation.
+The figures are informational only. **Nothing in the actor system decides anything from memory.** In particular, least-load placement of actors and of grains ([Chapter 21, §21.1](chap-21.md#211-placement-with-spawnon); [Chapter 13, §13.4](chap-13.md#134-finding-a-grain)) does not: `actorSystem.selectPlacementPeer` in `actor/spawn.go` and `actorSystem.selectActivationPeer` in `actor/grain_engine.go` both call `actorSystem.leastLoadedPeer` in `actor/grain_engine.go`, which asks every candidate peer for its node metric and picks the lowest load; the peer answers in `actorSystem.getNodeMetricHandler` in `actor/remote_server.go` with its number of actors plus its number of grains. Placement is [Chapter 21](chap-21.md), Placement, Singletons and Relocation; the peers are cluster members ([Chapter 19](chap-19.md)).
 
 ## 26.11 `TestKit`
 
-`New` in `testkit/testkit.go` builds a `TestKit` around a fresh, started, standalone actor system named `testkit`: no remoting, no cluster, an actor init timeout of one second with five retries, the extensions given with `WithExtensions`, and a discard logger unless `WithLogging(level)` installs a Zap logger on standard error (`testkit/option.go`). A failure to create or start the system calls `t.Fatal`.
+`New` in `testkit/testkit.go` builds a `TestKit` around a fresh, started, standalone actor system ([Chapter 3, §3.2](chap-03.md#32-construction-newactorsystem)) named `testkit`: no remoting ([Chapter 15](chap-15.md)), no cluster, an actor init timeout of one second with five retries ([Chapter 4, §4.4](chap-04.md#44-prestart-retries-and-the-timeout-that-is-not-one)), the extensions ([Chapter 12, §12.1](chap-12.md#121-extensions)) given with `WithExtensions`, and a discard logger unless `WithLogging(level)` installs a Zap logger on standard error (`testkit/option.go`). A failure to create or start the system calls `t.Fatal`.
 
 Every helper turns an error into a test failure through `require`, and every helper except `ActorSystem` and `Shutdown` first requires the kit to be started:
 
 | Helper | What it does |
 |---|---|
 | `TestKit.ActorSystem` | the underlying system, for anything not wrapped |
-| `TestKit.Spawn` | spawns a top-level actor; returns nothing, so look the PID up with `ActorOf` if you need it |
-| `TestKit.SpawnChild` | finds the parent by name with `ActorOf`, then spawns the child under it |
+| `TestKit.Spawn` | spawns a top-level actor ([Chapter 4, §4.2](chap-04.md#42-the-local-spawn-path-step-by-step)); returns nothing, so look the PID up with `ActorOf` if you need it |
+| `TestKit.SpawnChild` | finds the parent by name with `ActorOf`, then spawns the child under it ([Chapter 4, §4.6](chap-04.md#46-children)) |
 | `TestKit.Kill` | finds the actor by name and calls `Shutdown` on it |
-| `TestKit.Subscribe` | subscribes to the event stream and registers a `t.Cleanup` that unsubscribes |
+| `TestKit.Subscribe` | subscribes to the event stream ([Chapter 11, §11.3](chap-11.md#113-the-event-stream)) and registers a `t.Cleanup` that unsubscribes |
 | `TestKit.NewProbe`, `TestKit.NewGrainProbe` | create the probes of [§26.12](#2612-probes) and [§26.13](#2613-grain-probes) |
-| `GrainOf` in `testkit/grain_of.go` | `actor.GrainOf[T]` on the kit's system: activates or finds the grain of kind `T` |
+| `GrainOf` in `testkit/grain_of.go` | `actor.GrainOf[T]` on the kit's system: activates or finds the grain of kind `T` ([Chapter 13, §13.4](chap-13.md#134-finding-a-grain)) |
 | `TestKit.GrainIdentity` | the older, factory-based form; deprecated in favour of `GrainOf` |
-| `TestKit.Shutdown` | stops the system and marks the kit stopped |
+| `TestKit.Shutdown` | stops the system ([Chapter 3, §3.5](chap-03.md#35-stop)) and marks the kit stopped |
 
 `Shutdown` is not idempotent: a second call fails the test, because stopping a stopped system returns `ErrActorSystemNotStarted`. The same error defeats `Subscribe`'s cleanup when the kit was shut down first, which a `defer kit.Shutdown(ctx)` in the test body does: deferred calls run before `t.Cleanup` functions, and `actorSystem.Unsubscribe` in `actor/actor_system.go` refuses to run on a stopped system, so the cleanup's `require.NoError` fails the test. Shut the kit down from a `t.Cleanup` registered before `Subscribe` is called, as the package's own `newTestKit` in `testkit/testkit_test.go` does, or avoid `Subscribe` when shutting down in the body.
 
@@ -237,9 +250,9 @@ Every helper turns an error into a test failure through `require`, and every hel
 
 A `Probe` (`testkit/probe.go`) is an ordinary actor whose `Receive` hands every message to the test goroutine, plus a set of assertions that read them.
 
-**Creation.** `newProbe` in `testkit/probe.go` creates a buffered channel of `MessagesQueueMax` (1,000) entries, spawns a `probeActor` that holds it, under the name `probe-N` where `N` comes from the process-wide counter `probeCounter` (its comment: to avoid name collisions between probes in one test or across tests in the same process), and subscribes to the event stream. The default timeout is `DefaultTimeout`, three seconds. The probe actor is spawned with no options, so it gets the system's default passivation, two idle minutes ([Chapter 10, §10.1](chap-10.md#101-strategies)).
+**Creation.** `newProbe` in `testkit/probe.go` creates a buffered channel of `MessagesQueueMax` (1,000) entries, spawns a `probeActor` that holds it, under the name `probe-N` where `N` comes from the process-wide counter `probeCounter` (its comment: to avoid name collisions between probes in one test or across tests in the same process), and subscribes to the event stream. The default timeout is `DefaultTimeout`, three seconds. The probe actor is spawned with no options, so it gets the system's default passivation, two idle minutes (`DefaultPassivationTimeout` in `actor/defaults.go`; [Chapter 10, §10.1](chap-10.md#101-strategies)).
 
-**Recording.** `probeActor.Receive` in `testkit/probe.go` ignores `PostStart` and `PoisonPill` and pushes every other message onto the channel together with `ctx.Sender()`. The push blocks when the channel is full, which blocks the dispatcher worker running the probe's turn ([Chapter 7](chap-07.md)) until the test reads.
+**Recording.** `probeActor.Receive` in `testkit/probe.go` ignores `PostStart` ([Chapter 4, §4.3](chap-04.md#poststart-is-always-the-first-message)) and `PoisonPill` and pushes every other message onto the channel together with `ctx.Sender()`. The push blocks when the channel is full, which blocks the dispatcher worker running the probe's turn ([Chapter 7](chap-07.md)) until the test reads.
 
 **Reading.** Every assertion goes through `probe.receiveOne` in `testkit/probe.go`: wait for the next queued message or for a pooled timer (`Pool` in `internal/timer/timer.go`) set to the timeout, and return `nil` on timeout. When it returns a non-nil message, it records the sender, which `Sender` returns afterwards. The assertions are thin checks on that one message:
 
@@ -256,12 +269,12 @@ Each assertion consumes exactly one message and looks at nothing beyond it. `Exp
 
 **Sending.**
 
-- `probe.Send` in `testkit/probe.go` uses the probe's own PID as sender, so replies come back to the probe. In a cluster it calls `SendAsync` by name, which finds actors on any node; otherwise it resolves the name with `ActorOf` and calls `Tell`.
+- `probe.Send` in `testkit/probe.go` uses the probe's own PID as sender, so replies come back to the probe ([Chapter 5, §5.1](chap-05.md#51-three-ways-to-send)). In a cluster it calls `SendAsync` by name, which finds actors on any node; otherwise it resolves the name with `ActorOf` and calls `Tell`.
 - `probe.SendSync` resolves the name with `ActorOf`, then calls `SendSync` by name in a cluster or `Ask` otherwise, and **pushes the reply onto the probe's own queue** with the target as sender, so the reply is asserted with the `Expect` methods like any message. The push is from the test goroutine and blocks if the queue is full.
 
 **Watching.** `probe.Watch` and `probe.WatchNamed` (which resolves the name first) make the probe actor watch the target. When the target stops, it tells its watchers `Terminated` with itself as sender ([Chapter 9, §9.8](chap-09.md#98-death-watch)), and `ExpectTerminated` checks that sender's name. The watch must be in place before the stop.
 
-**Children.** `probe.expectChildSpawned` in `testkit/probe.go` reads the probe's event-stream subscriber, not the message queue. Every 50 ms it drains everything the subscriber has buffered (`subscriber.Iterator` in `eventstream/subscriber.go`; [Chapter 11, §11.3](chap-11.md#113-the-event-stream)) and looks for an `ActorChildCreated` whose parent and child names match. The subscriber exists from the probe's creation, so a child spawned before the probe was created is never seen. The drain discards every other event in the batch, including the `ActorChildCreated` of other children.
+**Children.** `probe.expectChildSpawned` in `testkit/probe.go` reads the probe's event-stream subscriber, not the message queue. Every 50 ms (until the timeout of `ExpectChildSpawned`, or of `ExpectChildSpawnedWithin`) it drains everything the subscriber has buffered (`subscriber.Iterator` in `eventstream/subscriber.go`; [Chapter 11, §11.3](chap-11.md#113-the-event-stream)) and looks for an `ActorChildCreated` whose parent and child names match. The subscriber exists from the probe's creation, so a child spawned before the probe was created is never seen. The drain discards every other event in the batch, including the `ActorChildCreated` of other children.
 
 **Stopping.** `probe.Stop` in `testkit/probe.go` shuts the subscriber down, unsubscribes it (ignoring the error) and shuts the probe actor down, failing the test if that fails. It also works after the kit has shut down: shutting down an actor that is no longer running returns `nil` (`PID.stop` in `actor/pid.go`).
 
@@ -269,16 +282,16 @@ Each assertion consumes exactly one message and looks at nothing beyond it. `Exp
 
 A `GrainProbe` (`testkit/grain_probe.go`) is not an actor and has no PID. `newGrainProbe` creates only a 1,000-entry queue, a timer pool and a reference to the system; the default timeout is `GrainDefaultTimeout`, 500 ms.
 
-- `grainProbe.SendSync` in `testkit/grain_probe.go` calls `AskGrain` and pushes the reply onto the queue. **It is the only thing that ever fills the queue.**
+- `grainProbe.SendSync` in `testkit/grain_probe.go` calls `AskGrain` ([Chapter 14, §14.6](chap-14.md#146-sending-and-waiting)) and pushes the reply onto the queue. **It is the only thing that ever fills the queue.**
 - `grainProbe.Send` calls `TellGrain` and returns. A grain has no sender to reply to for a tell sent this way, so after `Send` the only meaningful assertion is `ExpectNoResponse`.
 - The `ExpectResponse…` methods mirror the probe's: `grainProbe.receiveOne` waits for the next queued reply, and the checks are the same `reflect.DeepEqual`, type and presence tests.
-- `grainProbe.ExpectTerminated` in `testkit/grain_probe.go` does not use the queue and has no default-timeout form. It requires the system to be running, then polls `Grains` every 10 ms until the identity is absent or the duration has passed. In a cluster, `actorSystem.Grains` in `actor/grain_engine.go` also lists the grains the cluster registry knows of, so absence means deactivated everywhere the registry can see; if the registry query fails, that poll sees only the local grains.
+- `grainProbe.ExpectTerminated` in `testkit/grain_probe.go` does not use the queue and has no default-timeout form. It requires the system to be running, then polls `Grains` every 10 ms until the identity is absent or the duration has passed. `actorSystem.Grains` in `actor/grain_engine.go` returns an empty list while the system is stopping, which counts as absence. In a cluster it also lists the grains the cluster registry ([Chapter 20, §20.4](chap-20.md#204-the-registry)) knows of, so absence means deactivated everywhere the registry can see; if the registry query fails, that poll sees only the local grains.
 
 There is no `Stop`: nothing needs releasing. `NodeGrainOf` in `testkit/grain_of.go` is the cluster-node counterpart of `GrainOf`, and requires the node to be running.
 
 ## 26.14 Multi-node clusters
 
-`MultiNodes` (`testkit/multi_nodes.go`) runs a whole cluster inside the test process.
+`MultiNodes` (`testkit/multi_nodes.go`) runs a whole cluster ([Chapter 19](chap-19.md), [Chapter 20](chap-20.md)) inside the test process.
 
 **`NewMultiNodes`** records the testing value, a logger, the actor kinds to register on every node and the extensions. It starts nothing.
 
@@ -288,14 +301,14 @@ There is no `Stop`: nothing needs releasing. `NodeGrainOf` in `testkit/grain_of.
 
 1. Take three free ports from `Get` in `internal/net/dynaport.go` (ports free on both TCP and UDP, never handed out twice in the process; it panics rather than failing the test if it cannot find them): discovery, peers and remoting.
 2. Create a NATS discovery provider ([Chapter 19](chap-19.md), Membership and Discovery) on the shared server, subject `testSubject`, with the discovery port.
-3. Create an actor system named `testSystem` with remoting on the remoting port, the extensions, a three-minute shutdown timeout, and a cluster config: the kinds, 7 partitions, replica count 1, minimum peers quorum 1, the peers and discovery ports, and a 300 ms cluster state sync interval.
+3. Create an actor system named `testSystem` with remoting ([Chapter 15](chap-15.md)) on the remoting port, the extensions, a three-minute shutdown timeout ([Chapter 3, §3.5](chap-03.md#35-stop)), and a cluster config ([Chapter 20, §20.2](chap-20.md#202-configuration)): the kinds, 7 partitions, replica count 1, minimum peers quorum 1, the peers and discovery ports, and a 300 ms cluster state sync interval.
 4. Start it and **pause two seconds**, then register a `TestNode` under the given name.
 
 The name is only the key in the `MultiNodes` map and the value `TestNode.NodeName` returns; every node's actor system is called `testSystem`. Starting a second node under a name already in use replaces the first in the map, and the replaced node is then never stopped by `Stop`.
 
-**`TestNode`** (`testkit/testnode.go`) offers `Spawn`, `SpawnSingleton`, `Kill`, `Subscribe`, `SpawnProbe`, `SpawnGrainProbe` and the deprecated `GrainIdentity`, with the same behaviour as the `TestKit` helpers, on that node's system, plus `NodeName` and `ActorSystem`. The helpers that act on the system, except `GrainIdentity`, require the node to be running. Its methods have value receivers but share the `created` flag by pointer, so a node stopped through `MultiNodes.StopNode` refuses further use.
+**`TestNode`** (`testkit/testnode.go`) offers `Spawn`, `SpawnSingleton` ([Chapter 21, §21.4](chap-21.md#214-cluster-singletons)), `Kill`, `Subscribe`, `SpawnProbe`, `SpawnGrainProbe` and the deprecated `GrainIdentity`, with the same behaviour as the `TestKit` helpers, on that node's system, plus `NodeName` and `ActorSystem`. The helpers that act on the system, except `GrainIdentity`, require the node to be running. Its methods have value receivers but share the `created` flag by pointer, so a node stopped through `MultiNodes.StopNode` refuses further use.
 
-**Stopping.** `MultiNodes.StopNode` stops the node's actor system, then closes its discovery provider, fails the test on error, marks the node stopped (its `created` flag) and removes the node from the map. `MultiNodes.Stop` stops the actor system and closes the discovery provider of every node in map order, without touching their `created` flags, then shuts the NATS server down and empties the map; it is a no-op when not started, so it can be registered with `t.Cleanup(multi.Stop)` right after `Start`. If one node fails to stop, `Stop` calls `Fatalf` at once, leaving the remaining nodes and the NATS server running. `MultiNodes.GetNode` and `MultiNodes.StopNode` fail the test for an unknown name or before `Start`, and `MultiNodes.NodeCount` returns the number of nodes in the map.
+**Stopping.** `MultiNodes.StopNode` stops the node's actor system, then closes its discovery provider, fails the test on error, marks the node stopped (its `created` flag) and removes the node from the map. `MultiNodes.Stop` stops the actor system and closes the discovery provider of every node in map order, without touching their `created` flags, then shuts the NATS server down and empties the map; it is a no-op when not started, so it can be registered with `t.Cleanup(multi.Stop)` right after `Start`. If one node fails to stop, `Stop` marks the `MultiNodes` stopped and calls `Fatalf` at once, leaving the remaining nodes and the NATS server running; a later `Stop` is then a no-op. `MultiNodes.GetNode` and `MultiNodes.StopNode` fail the test for an unknown name or before `Start`, and `MultiNodes.NodeCount` returns the number of nodes in the map.
 
 A typical cluster test therefore reads: `NewMultiNodes`, `Start`, `t.Cleanup(multi.Stop)`, three `StartNode` calls, then probes spawned on the nodes. Each `StartNode` costs at least two seconds.
 
@@ -320,18 +333,18 @@ A typical cluster test therefore reads: `NewMultiNodes`, `Start`, `t.Cleanup(mul
 | Counts older than the window are dropped, a bucket at a time; a window idle for longer than its length is reset at the current time | `TestHardResetAfterIdle` in `breaker/breaker_test.go`; `TestBucketAdvanceRotatesAndExpiresOldCounts`, `TestBucketHardResetWhenWindowGoesStale` and `TestBucketSnapshotExpiresStaleWindow` in `breaker/bucket_test.go` |
 | Advancing keeps buckets aligned; `reset` realigns at the current time; `newBuckets` raises the count to 1 and the bucket length to 1 ns | `TestBucketAdvanceKeepsAlignment`, `TestBucketResetClearsCountsAndRealignsWindow`, `TestNewBucketsNormalizesCount` and `TestNewBucketsEnforcesMinimumDuration` in `breaker/bucket_test.go` |
 | `Error` formats with and without a cause, matches sentinels by type only, and unwraps to its cause; states render as `closed`, `open`, `half-open`, `unknown` | `TestError_Error`, `TestError_Is` and `TestError_Unwrap` in `breaker/errors_test.go`; `TestStateString` in `breaker/state_test.go` |
-| `PipeTo` and `PipeToName` with a breaker deliver a successful result, and send a failed task's error to the dead letters | `TestPipeTo` and `TestPipeToName` in `actor/pid_test.go` |
+| [`PipeTo`](chap-05.md#57-pipeto) and `PipeToName` with a breaker deliver a successful result, and send a failed task's error to the [dead letters](chap-05.md#54-dead-letters) | `TestPipeTo` and `TestPipeToName` in `actor/pid_test.go` |
 | `PipeToGrain` with a breaker delivers a successful result | `TestGrainContextPipeToGrain` in `actor/grain_context_test.go` |
 | On supported platforms `Size` is above 64 MiB, `Free` is non-zero and at most `Size`, and `Used` is non-zero | `TestSize`, `TestFree`, `TestFreeDoesNotExceedSize` and `TestUsed` in `memory/memory_test.go` |
 | On macOS the page size matches the runtime's, `Free` is a whole number of pages, and the sysctls are read at their kernel widths | `TestPageSizeMatchesRuntime`, `TestFreeIsWholePages` and `TestSysctlWidths` in `memory/memory_darwin_test.go` |
 | On unsupported platforms `Size` and `Free` return `errors.ErrUnsupported` and `Used` still works | `TestSizeUnsupported`, `TestFreeUnsupported` and `TestUsedOnUnsupportedPlatform` in `memory/memory_unsupported_test.go` |
-| `ActorSystem.Metric` reports non-zero memory size, used and available | `TestActorSystem` in `actor/actor_system_test.go` |
+| `ActorSystem.Metric` ([Chapter 12, §12.3](chap-12.md#123-metric-snapshots)) reports non-zero memory size, used and available | `TestActorSystem` in `actor/actor_system_test.go` |
 | `TestKit` spawns actors and children, kills by name, subscribes, creates grain identities, and `Shutdown` stops its system | `TestTestKit` in `testkit/testkit_test.go` |
 | A probe receives replies with their sender, checks value, type, predicate and absence, records a `SendSync` reply, observes `Terminated` after `Watch` or `WatchNamed`, sees a child spawned after its creation, and two probes get distinct names | `TestTestProbe` in `testkit/probe_test.go` |
 | A grain probe records `SendSync` replies, sees nothing after `Send`, and observes a grain's deactivation | `TestGrainProbe` in `testkit/grain_probe_test.go` |
 | `GrainOf` and `NodeGrainOf` return usable identities | `TestGrainOf` and `TestNodeGrainOf` in `testkit/grain_of_test.go` |
 | A `TestNode`'s helpers work on a cluster node; `NodeCount`, `GetNode` and `StopNode` track the nodes | `TestTestNode` and `TestMultiNodes` in `testkit/testnode_test.go` |
-| Three nodes started by one `MultiNodes` form one cluster that agrees on a single leader | `TestLeaderElection` in `testkit/leader_test.go` |
+| Three nodes started by one `MultiNodes` form one cluster that agrees on a single leader; after the leader's node is stopped through `StopNode`, the survivors elect a new one and each publishes one `LeaderChanged` | `TestLeaderElection` in `testkit/leader_test.go` |
 
 ## Implementation details (may change)
 
@@ -356,17 +369,17 @@ A typical cluster test therefore reads: `NewMultiNodes`, `Start`, `t.Cleanup(mul
 | `ErrOpen` also rejects half-open calls when every token is taken, and says `State: Open` | `CircuitBreaker.tryAcquire` in `breaker/breaker.go` |
 | `ErrTimeout` matches only a context done before `fn` ran; a deadline during `fn` returns `fn`'s error | `contextError` in `breaker/breaker.go` |
 | The breaker never stops a running `fn`; `fn` must honour its context | `CircuitBreaker.Execute` in `breaker/breaker.go` |
-| In `PipeTo`, an open breaker drops the outcome but the task still runs, and a panic in the task is recovered by nothing and crashes the process | `PID.handleCompletion` in `actor/pid.go`; `New` in `internal/future/future.go` |
+| In [`PipeTo`](chap-05.md#57-pipeto), an open breaker drops the outcome but the task still runs, and a panic in the task is recovered by nothing and crashes the process | `PID.handleCompletion` in `actor/pid.go`; `New` in `internal/future/future.go` |
 | A breaker only trips across calls; pass one instance to many `PipeTo` calls | `WithCircuitBreaker` in `actor/pipe_option.go` |
 | `Used` is the Go heap of the process, not the host's used memory, although `Metric.MemoryUsed` calls it "used memory of the system" | `Used` in `memory/memory.go`; `Metric.MemoryUsed` in `actor/metric.go` |
-| On an unsupported platform, `Metric` reports 0 for memory size and available | `actorSystem.Metric` in `actor/actor_system.go` |
-| Least-load placement uses actor and grain counts, never memory | `actorSystem.getNodeMetricHandler` in `actor/remote_server.go` |
+| On an unsupported platform, `Metric` ([Chapter 12, §12.3](chap-12.md#123-metric-snapshots)) reports 0 for memory size and available | `actorSystem.Metric` in `actor/actor_system.go` |
+| Least-load placement ([Chapter 21, §21.1](chap-21.md#211-placement-with-spawnon)) uses actor and grain counts, never memory | `actorSystem.getNodeMetricHandler` in `actor/remote_server.go` |
 | `TestKit.Subscribe`'s cleanup fails the test if the kit was already shut down, as with `defer kit.Shutdown(ctx)` | `TestKit.Subscribe` in `testkit/testkit.go`; `actorSystem.Unsubscribe` in `actor/actor_system.go` |
 | `TestKit.Shutdown` called twice fails the test | `TestKit.Shutdown` in `testkit/testkit.go` |
 | Every message assertion (all `Expect` methods except `ExpectChildSpawned`) consumes exactly the next message; an unexpected message first fails the assertion | `probe.receiveOne` in `testkit/probe.go` |
 | A passing `ExpectNoMessage` always takes the full three seconds (a passing `ExpectNoResponse`, 500 ms) | `probe.expectNoMessage` in `testkit/probe.go` |
-| A full probe queue blocks a dispatcher worker inside the probe's `Receive` | `probeActor.Receive` in `testkit/probe.go` |
-| A probe idle for two minutes is passivated like any actor spawned without options | `newProbe` in `testkit/probe.go` |
+| A full probe queue blocks a dispatcher worker ([Chapter 7](chap-07.md)) inside the probe's `Receive` | `probeActor.Receive` in `testkit/probe.go` |
+| A probe idle for two minutes is passivated ([Chapter 10](chap-10.md)) like any actor spawned without options | `newProbe` in `testkit/probe.go` |
 | `ExpectChildSpawned` sees only children spawned after the probe was created, and discards the other events it drains | `probe.expectChildSpawned` in `testkit/probe.go` |
 | `ExpectMessage` compares with `reflect.DeepEqual`, not `proto.Equal` | `probe.expectMessage` in `testkit/probe.go` |
 | A grain probe records only `SendSync` replies; `Send` never yields a response | `grainProbe.Send` in `testkit/grain_probe.go` |

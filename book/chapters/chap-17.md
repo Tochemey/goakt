@@ -43,9 +43,9 @@
 - What the public `remote` package holds: the configuration, its options, the compression and protocol enums, the request types and the serializer contract.
 - How the protobuf, CBOR and JSON serializers frame a message, and how the actor system picks a serializer for each message on the way out and on the way in.
 - How the remote server is started, which 27 request types it answers, and the checks every handler runs before it touches an actor.
-- What happens to a remote tell and a remote ask on the receiving node, including dead letters, error codes and the sender identity.
-- How the remote watch registry and the remote hold registry keep cross-node state outside the actor tree.
-- What `internal/codec` converts, and which details of a supervisor, a passivation strategy or a reentrancy setting survive the trip.
+- What happens to a remote tell and a remote ask on the receiving node, including [dead letters](chap-05.md#54-dead-letters), error codes and the sender identity.
+- How the remote watch registry ([death watch across nodes](chap-09.md#99-remote-watch)) and the remote hold registry ([flow-control credit](chap-15.md#158-flow-control)) keep cross-node state outside the actor tree.
+- What `internal/codec` converts, and which details of a [supervisor](chap-09.md#91-the-supervisor-value), a [passivation strategy](chap-10.md#101-strategies) or a [reentrancy](chap-08.md#85-reentrancy-requests-that-do-not-block) setting survive the trip.
 
 ## 17.1 The `remote` package
 
@@ -81,9 +81,9 @@
 
 **Bind address.** The `Config` comment states the rule: the bind address must be an IP, not a DNS name, so the node binds a known interface without name resolution. A wildcard (`0.0.0.0` or `::`) is resolved by `Config.Sanitize` to a private IP, then a public one, then loopback (`GetBindIP` in `internal/net/helper.go`). `actorSystem.validate` in `actor/actor_system.go` calls `Sanitize` and keeps the configured wildcard as the listen host, so the server listens on every interface while actors carry the resolved address.
 
-**Validation.** `Config.Validate` checks for a non-empty bind address and a port from 0 to 65535, the size relations of [Chapter 15, §15.10](chap-15.md#1510-semantics-defaults-and-invariants), the timeouts, at least one serializer, a positive idle-connection count, dial timeout and keep-alive, a valid pin, the lane count, and each large-destination pattern through `path.Match` (`isValidLargeDestinationPattern` in `remote/config.go`). **The actor system never calls it**: `actorSystem.validate` calls only `Sanitize`, so an out-of-range value in a `Config` passed to `WithRemote` is not rejected at start.
+**Validation.** `Config.Validate` checks for a non-empty bind address and a port from 0 to 65535, the size relations of [Chapter 15, §15.10](chap-15.md#1510-semantics-defaults-and-invariants), the timeouts, at least one serializer, a positive idle-connection count, dial timeout and keep-alive, a valid pin, the lane count, and each large-destination pattern through `path.Match` (`isValidLargeDestinationPattern` in `remote/config.go`). **The actor system never calls it**: `actorSystem.validate` calls only `Sanitize`, so an out-of-range value in a `Config` passed to `WithRemote` is not rejected when the system is built or started.
 
-**TLS precedence.** When both `remote.WithTLS` and the deprecated `actor.WithTLS` are set, the remote configuration wins and a warning is logged; with remoting on, TLS needs both a server and a client configuration, or start fails with `ErrInvalidTLSConfiguration` (`actorSystem.validate` in `actor/actor_system.go`).
+**TLS precedence.** When both `remote.WithTLS` and the deprecated `actor.WithTLS` are set, the remote configuration wins and a warning is logged; with remoting on, TLS needs both a server and a client configuration, or `NewActorSystem` fails with `ErrInvalidTLSConfiguration` (`actorSystem.validate` in `actor/actor_system.go`, called at construction, [Chapter 3, §3.2](chap-03.md#32-construction-newactorsystem)).
 
 ### Options
 
@@ -115,7 +115,7 @@ These structs are what the client API takes; the client validates and sanitises 
 | `SpawnChildRequest` | non-empty `Name`, `Kind` and `Parent`; dependency IDs; reentrancy mode | trims `Name`, `Kind` and `Parent` |
 | `GrainRequest` | non-empty `Name` and `Kind`; dependency IDs | trims; a non-positive `ActivationTimeout` becomes one second and non-positive `ActivationRetries` becomes 5 |
 
-`SingletonSpec` carries the spawn timeout, wait interval and retry count of a remote singleton spawn. `SpawnRequest.Relocatable` is a plain `bool`: a request that leaves it unset arrives as `false`, and the server spawns the actor with relocation disabled ([§17.6](#176-actor-lifecycle-and-query-handlers)).
+`SpawnRequest`, `SpawnChildRequest` and `GrainRequest` each carry a `Dispatcher` name: the dispatcher, declared on the hosting node with `WithDispatcherPool`, that runs the turns of the actor or grain ([Chapter 7, §7.1](chap-07.md#71-the-pieces)). Empty means the hosting node's default dispatcher, and the `Validate` and `Sanitize` methods do not touch it. `SingletonSpec` carries the spawn timeout, wait interval and retry count of a remote singleton spawn. `SpawnRequest.Relocatable` is a plain `bool`: a request that leaves it unset arrives as `false`, and the server spawns the actor with relocation disabled ([§17.6](#176-actor-lifecycle-and-query-handlers)).
 
 `ActorState` names the predicate a `RemoteState` query tests: unknown, running, suspended, stopping, relocatable, singleton, with the values 0 to 5 of the protobuf `State` enum (`remote/actor_state.go`), so `EncodeActorState` in `internal/codec/codec.go` is a plain conversion.
 
@@ -131,7 +131,7 @@ These structs are what the client API takes; the client validates and sanitises 
 - **Concurrency.** One instance is called from many goroutines without locking.
 - **Errors.** A failure returns a non-nil error, never a nil value with a nil error.
 
-The architecture overview explains why messages are `any` with pluggable serializers ("Why `any` and pluggable serializers"): local messages are never serialised, and only messages that leave the node need one.
+The [architecture overview](../architecture.md) explains why messages are `any` with pluggable serializers ("Why `any` and pluggable serializers"): local messages are never serialised, and only messages that leave the node need one.
 
 ### The shared frame
 
@@ -161,9 +161,9 @@ CBOR encodes without key sorting, forbids indefinite lengths and decodes at most
 Two actor messages travel with their own unexported serializers, which `actorSystem.setupRemoting` in `actor/actor_system.go` registers on the client before any user serializer:
 
 - **`PoisonPill`**: the whole frame is the fixed 8 bytes `DE AD BE EF CA FE BA BE`. `Deserialize` accepts exactly those 8 bytes and nothing else (`poisonPillSerializer` in `actor/poison_pill_serializer.go`).
-- **`Terminated`**: an 8-byte magic `DE AD AC 70 52 BE EF ED`, the path length as a `uint32`, the path text, and the time as Unix nanoseconds in an `int64`. `Deserialize` requires the magic, an exact total length and a parseable address; an empty path gives a `Terminated` with no path (`terminatedSerializer` in `actor/terminated_serializer.go`).
+- **`Terminated`** ([death watch](chap-09.md#98-death-watch)): an 8-byte magic `DE AD AC 70 52 BE EF ED`, the path length as a `uint32`, the path text, and the time as Unix nanoseconds in an `int64`. `Deserialize` requires the magic, an exact total length and a parseable address; an empty path gives a `Terminated` with no path (`terminatedSerializer` in `actor/terminated_serializer.go`).
 
-Both magics read as a `totalLen` larger than the frame that carries them, so neither passes for the shared frame. `setupRemoting` also registers the serializers of the reentrancy envelopes (`AsyncRequest`, `AsyncResponse`) and of the five reliable-delivery commands from `internal/commands`.
+Both magics read as a `totalLen` larger than the frame that carries them, so neither passes for the shared frame. `setupRemoting` also registers the serializers of the [reentrancy](chap-08.md#85-reentrancy-requests-that-do-not-block) envelopes (`AsyncRequest`, `AsyncResponse`) and of the five [reliable-delivery](chap-23.md#234-the-wire-protocol) commands from `internal/commands`.
 
 ## 17.3 Choosing a serializer
 
@@ -180,7 +180,7 @@ For a concrete registration, `RegisterSerializerType` in `internal/types/global.
 
 ### `Config.Serializer`
 
-`Config.Serializer(msg)` walks the serializer map and returns the first entry whose type equals the message type or, for an interface entry, is implemented by it; `nil` for a `nil` message or no match (`remote/config.go`). Its own comment and the option comments promise that an exact type wins over an interface and that registration order decides within each kind, but the code walks a Go map, whose order the language does not define. `Config.Serializers` returns a copy of the map.
+`Config.Serializer(msg)` walks the serializer map and returns the first entry whose type equals the message type or, for an interface entry, is implemented by it; `nil` for a `nil` message or no match (`remote/config.go`). The walk is over a Go map, whose order the language does not define, so an exact-type entry is not ranked above an interface entry and registration order does not decide between entries. `Config.Serializers` returns a copy of the map.
 
 ### What the actor system uses
 
@@ -209,23 +209,23 @@ A `nil` reply gives an empty envelope; a reply type with no serializer fails the
 
 ### Start
 
-`actorSystem.startRemoteServer` in `actor/remote_server.go` runs as a step of `Start` and does nothing when remoting is off. In order:
+`actorSystem.startRemoteServer` in `actor/remote_server.go` runs as a step of `Start` ([Chapter 3, §3.3](chap-03.md#33-start)) and does nothing when remoting is off. In order:
 
 1. Cache the advertised address, `host:port` from the sanitised configuration, in `remoteHostPort`. Every handler compares requests against it.
 2. Compute the listen address from the listen host, which differs from the advertised one only for a wildcard bind ([§17.1](#171-the-remote-package)).
 3. Register the 27 request handlers of `actorSystem.remotingServerOptions`, keyed by protobuf type name.
 4. Pass the transport settings: frame size, idle and read-idle timeouts, system name, accept mode, credit window, write timeout, concurrent large transfers, message size, chunk size.
-5. Install the duplex user handlers: `actorSystem.duplexRemoteTell`, `actorSystem.duplexRemoteAsk`, and the sender resolver that builds a sender PID once per table entry ([Chapter 15, §15.7](chap-15.md#157-reference-tables-and-buffers)).
+5. Install the duplex user handlers: `actorSystem.duplexRemoteTell`, `actorSystem.duplexRemoteTellBatch`, `actorSystem.duplexRemoteAsk`, and the sender resolver that builds a sender PID once per table entry ([Chapter 15, §15.7](chap-15.md#157-reference-tables-and-buffers)).
 6. Give the server a base context detached from `Start`'s cancellation with `context.WithoutCancel`. The comment gives the reason: the server lives until `Stop`, and a bounded start context that expires later must not cancel every inbound handler context.
 7. Install a panic handler that logs the request type and the recovered value.
 8. Install the compression: a connection wrapper for the configured algorithm, used only by legacy connections, and the duplex codec of `duplexCompressionCodec`. A gzip or zstd wrapper that cannot be built fails the start.
 9. Add the TLS server configuration when there is one, build the server, listen, and run `Serve` on a goroutine.
 
-**If `Serve` returns an error, the goroutine logs it and calls `os.Exit(1)`.** Shutdown is `actorSystem.shutdownRemoting` in `actor/actor_system.go`: it closes the client, stops the dead-letter drain of [§17.5](#175-tell-and-ask), calls `RemotingServer.Shutdown` with the smaller of 30 seconds and the context's deadline ([Chapter 15, §15.3](chap-15.md#153-architecture)), and only then clears `remotingEnabled`.
+**If `Serve` returns an error, the goroutine logs it and calls `os.Exit(1)`.** Shutdown is `actorSystem.shutdownRemoting` in `actor/actor_system.go`: it closes the client ([Chapter 16](chap-16.md)), stops the dead-letter drain of [§17.5](#175-tell-and-ask), calls `RemotingServer.Shutdown` with the smaller of 30 seconds and the context's deadline ([Chapter 15, §15.3](chap-15.md#153-architecture)), and only then clears `remotingEnabled`; it belongs to the stop sequence of [Chapter 3, §3.5](chap-03.md#35-stop).
 
 ### How a request reaches a handler
 
-Each handler is a `ProtoHandler`: it takes a context, a connection and a `proto.Message`, and returns a `proto.Message` and an error. Four transport paths call them:
+Each handler is a `ProtoHandler`: it takes a context, a connection and a `proto.Message`, and returns a `proto.Message` and an error. Three transport paths call them, and a fourth carries user payloads to separate duplex methods:
 
 | Path | Entry in `internal/net` | Handler |
 |---|---|---|
@@ -249,6 +249,22 @@ Each handler is a `ProtoHandler`: it takes a context, a connection and a `proto.
 
 ### The common checks
 
+```mermaid
+flowchart TD
+    A["request"] --> B{"1 type matches"}
+    B -->|"no"| E1["INVALID_ARGUMENT"]
+    B -->|"yes"| C{"2 remoting on"}
+    C -->|"no"| E2["FAILED_PRECONDITION"]
+    C -->|"yes"| D{"3 context extracted"}
+    D -->|"no"| E1
+    D -->|"yes"| F{"4 host is this node"}
+    F -->|"no"| E1
+    F -->|"yes"| G{"5 name not reserved"}
+    G -->|"no"| E2
+    G -->|"yes"| H["6 deadline"]
+    H --> I["7 lookup, then the handler's own work"]
+```
+
 The handlers share one shape. Each runs the subset of these steps that [§17.5](#175-tell-and-ask) to [§17.7](#177-grain-entry-points) list, in this order, except that respawn, stop, spawn child and the metric query apply the deadline after their lookup, and the grain ask and tell handlers validate the host before they extract the context:
 
 1. **Type.** Assert the request type; a mismatch is `CODE_INVALID_ARGUMENT`.
@@ -257,7 +273,7 @@ The handlers share one shape. Each runs the subset of these steps that [§17.5](
 4. **Host.** `actorSystem.validateRemoteHost` compares `net.JoinHostPort(host, port)` from the request with `remoteHostPort`; any difference is `CODE_INVALID_ARGUMENT` with `ErrInvalidHost`. A request meant for another node, or for this node under another address, is refused.
 5. **Reserved names.** A name with the reserved prefix (`isSystemName` in `actor/reserved.go`) is `CODE_FAILED_PRECONDITION`, reported as an actor that does not exist (as a reserved name by the grain handlers).
 6. **Deadline.** `deadlineContext` bounds the context by the deadline the caller sent as remaining time (`Metadata.DeadlineContext` in `internal/net/metadata.go`). Watch, unwatch and reinstate skip it, and their comments say why: the work is in memory, with nothing a deadline could cancel. So do the query handlers, except the metric one.
-7. **Lookup.** Resolve the actor. A tree node whose PID is already gone (a node being deleted) is reported as `CODE_NOT_FOUND` by every handler that looks an actor up by address; unwatch answers success and a tell dead-letters the message ([§17.5](#175-tell-and-ask)).
+7. **Lookup.** Resolve the actor ([addresses](chap-04.md#45-names-addresses-and-identity)). A tree node whose PID is already gone (a node being deleted) is reported as `CODE_NOT_FOUND` by every handler that looks an actor up by address; unwatch answers success and a tell dead-letters the message ([§17.5](#175-tell-and-ask)).
 
 ## 17.5 Tell and ask
 
@@ -281,8 +297,8 @@ flowchart TD
 **A batch.** `actorSystem.remoteTellHandler` in `actor/remote_server.go` receives a `RemoteTellRequest`: a list of `RemoteMessage` values, each with a sender, a receiver, the serialised message and a per-message metadata map (`protos/internal/remoting.proto`). After steps 1 to 3 of [§17.4](#174-the-server) it splits the frame's credit lease into one share per message (`CreditLease.Split` in `internal/net/duplex_lease.go`; on the legacy path there is no lease and every share is `nil`, which releases as a no-op). Then, for each message, it skips a `nil` entry, releasing its share, and calls `actorSystem.deliverRemoteTellMessage`, which passes the message's fields to `actorSystem.deliverRemoteTellBytes`. That function:
 
 1. Decodes the payload once with the composite of [§17.3](#173-choosing-a-serializer). A decode failure is logged, the share released, and the message dropped.
-2. Applies the message's own metadata on top of the request's context, through the propagator (`actorSystem.messageMetadata`). With no metadata or no propagator, the request's context is kept. An `Extract` failure releases the share and dead-letters the message, or only logs it when the receiver does not parse.
-3. Uses the sender PID it was given, or builds one from the sender string, and calls `actorSystem.deliverRemoteTellFrom`.
+2. Uses the sender PID it was given, or builds one from the sender string.
+3. Applies the message's own metadata on top of the request's context, through the propagator (`actorSystem.messageMetadata`). With no metadata or no propagator, the request's context is kept. An `Extract` failure releases the share and dead-letters the message, or only logs it when the receiver does not parse. Otherwise it calls `actorSystem.deliverRemoteTellFrom`.
 
 The handler always answers `RemoteTellResponse` once it gets past step 3 of [§17.4](#174-the-server). **One bad message never fails its siblings**: the code comment explains that the client's coalescer packs independent tells from many senders into one batch.
 
@@ -292,7 +308,7 @@ The handler always answers `RemoteTellResponse` once it gets past step 3 of [§1
 
 `deserializeDuplexPayload` decodes serializer ID 0 as internal protobuf by its type name, copies the payload of serializer ID 255 before decoding because a custom serializer may keep its input (`copyDuplexPayload`), and hands every other ID to the composite.
 
-**The shared delivery.** `actorSystem.deliverRemoteTellFrom` looks the receiver up by its wire string and hands the message to `actorSystem.handleRemoteTellHeld` in `actor/actor_system.go`, which attaches the credit share to the receive context, records it in the actor's hold registry ([§17.9](#179-the-remote-hold-registry)) and enqueues with `PID.doReceive`. Every failure releases the share:
+**The shared delivery.** `actorSystem.deliverRemoteTellFrom` looks the receiver up by its wire string and hands the message to `actorSystem.handleRemoteTellHeld` in `actor/actor_system.go`, which attaches the credit share to the [receive context](chap-08.md#81-one-object-per-message), records it in the actor's hold registry ([§17.9](#179-the-remote-hold-registry)) and enqueues with `PID.doReceive` ([mailboxes](chap-06.md#61-the-contract)). Every failure releases the share:
 
 | Failure | Result |
 |---|---|
@@ -307,7 +323,7 @@ A message that reaches `PID.doReceive` but is refused there, because the system 
 
 **Dead letters.** `actorSystem.deadLetterRemoteMessage` builds a `SendDeadletter` command with sender, receiver, the decoded message, the time and the cause, and has the system guardian tell it to the dead-letter actor. When either actor is missing or not running, the dead letter is skipped.
 
-**Outbound failures.** A tell that fails after the local client admitted it comes back through `actorSystem.enqueueCoalescedFailure`, the client's tell-failure handler. It logs a warning and queues the batch on a channel of 256 entries (`coalescedFailureQueueSize`); a full queue, or a system that is shutting down, drops the batch with a log. One goroutine, `actorSystem.drainCoalescedFailures`, parses each receiver, decodes each payload and publishes a dead letter per message.
+**Outbound failures.** A tell that fails after the local client admitted it comes back through `actorSystem.enqueueCoalescedFailure`, the client's tell-failure handler. It logs a warning, then queues the batch on a channel of 256 entries (`coalescedFailureQueueSize`); a system that is shutting down drops the batch silently after the warning, and a full queue drops it with a second log. One goroutine, `actorSystem.drainCoalescedFailures`, parses each receiver, decodes each payload and publishes a dead letter per message.
 
 ### Ask
 
@@ -332,8 +348,8 @@ The first failure ends the request: the replies already computed are discarded, 
 `actorSystem.remoteSpawnHandler` serves `SpawnOn` and remote singleton spawns. After steps 1 to 6 of [§17.4](#174-the-server):
 
 1. Instantiate the actor from its kind with `reflection.instantiateActor` in `actor/reflection.go`: the kind must be in the system's type registry (`ActorSystem.Register`, or the kinds of the cluster configuration), and the result is a fresh zero value. An unknown kind is `CODE_FAILED_PRECONDITION` with `ErrTypeNotRegistered`.
-2. **With a singleton spec**, build singleton options from the spawn timeout, wait interval, retries, role and supervisor, and call `SpawnSingleton`, which places the singleton by its own rules ([Chapter 21](chap-21.md), Placement, Singletons and Relocation).
-3. **Otherwise**, build spawn options from the wire: the passivation strategy (a missing one decodes to `nil`, which keeps the system default), the init timeout, relocation disabled when `relocatable` is false, stashing, reentrancy, role, supervisor, and dependencies rebuilt from the type registry. A dependency that cannot be rebuilt is `CODE_INTERNAL_ERROR`.
+2. **With a singleton spec**, build singleton options from the spawn timeout, wait interval, retries, role and supervisor, and call `SpawnSingleton`; the singleton options carry no dispatcher, so a `Dispatcher` on a singleton request is not applied. `SpawnSingleton` places the singleton by its own rules ([Chapter 21, §21.4](chap-21.md#214-cluster-singletons)).
+3. **Otherwise**, build [spawn options](chap-04.md#42-the-local-spawn-path-step-by-step) from the wire: the [passivation strategy](chap-10.md#101-strategies) (a missing one decodes to `nil`, which keeps the system default), the init timeout, relocation disabled when `relocatable` is false, [stashing](chap-08.md#84-the-stash), [reentrancy](chap-08.md#85-reentrancy-requests-that-do-not-block), role, the dispatcher name when set (`WithDispatcher`), [supervisor](chap-09.md#91-the-supervisor-value), and dependencies rebuilt from the type registry ([Chapter 12, §12.2](chap-12.md#122-dependencies)). A dispatcher name the node did not declare makes the spawn fail with `ErrDispatcherNotFound`, which `spawnErrorToProto` answers as `CODE_INTERNAL_ERROR`. A dependency that cannot be rebuilt is `CODE_INTERNAL_ERROR`.
 4. A reliable-delivery spec requires clustering, else `CODE_FAILED_PRECONDITION` with `ErrReliableClusterRequired`; the code comment says a remoting-only host cannot resolve the peer controllers. A spec that cannot become a spawn option, such as a durable queue absent from the dependencies, is `CODE_FAILED_PRECONDITION` (`reliableSpawnOptionFromWire` in `actor/reliable_delivery_config.go`).
 5. Spawn and answer the new actor's address. A running local actor that already has the name is not an error: `Spawn` returns it and the handler answers its address (`nameResolver` in `actor/spawn.go`).
 
@@ -350,14 +366,14 @@ The comment on `spawnErrorToProto` gives the reason for `CODE_UNAVAILABLE`: the 
 
 ### Spawn child
 
-`actorSystem.remoteSpawnChildHandler` creates a child under an existing parent on this node. After steps 1 to 5 (both names are checked), it looks the parent up by its address; a missing or stopped parent is `CODE_NOT_FOUND`. It then requires **the requested kind to equal the parent's kind**, else `CODE_FAILED_PRECONDITION` with `ErrInvalidKinds`, builds the options of a spawn except the role and the reliable-delivery spec, which the child request does not carry, applies the deadline, and calls `PID.SpawnChild` with **the parent's own actor value** (`pid.Actor()`). The child and its parent therefore share one `Actor` value. The caller's actor value never leaves its node: `PID.spawnChildRemote` in `actor/pid.go` sends only its kind. A running child that already has the name is answered with its address; one that exists but is not running gives `ErrActorAlreadyExists`, which is `CODE_ALREADY_EXISTS` (`nameResolver` in `actor/spawn.go`); other errors are `CODE_INTERNAL_ERROR`.
+`actorSystem.remoteSpawnChildHandler` creates a child under an existing parent on this node. After steps 1 to 5 (both names are checked), it looks the parent up by its address; a missing or stopped parent is `CODE_NOT_FOUND`. It then requires **the requested kind to equal the parent's kind**, else `CODE_FAILED_PRECONDITION` with `ErrInvalidKinds`, builds the options of a spawn except the role and the reliable-delivery spec, which the child request does not carry (the dispatcher name, when set, is applied), applies the deadline, and calls `PID.SpawnChild` with **the parent's own actor value** (`pid.Actor()`). The child and its parent therefore share one `Actor` value. The caller's actor value never leaves its node: `PID.spawnChildRemote` in `actor/pid.go` sends only its kind. A running child that already has the name is answered with its address; one that exists but is not running gives `ErrActorAlreadyExists`, which is `CODE_ALREADY_EXISTS` (`nameResolver` in `actor/spawn.go`); other errors are `CODE_INTERNAL_ERROR`.
 
 ### Other lifecycle handlers
 
 | Handler | Checks | Resolves by | Does |
 |---|---|---|---|
 | `remoteLookupHandler` | 1 to 4, 6 | in a cluster, a non-reserved name goes to the cluster registry; otherwise the local tree by address | answers the address; the registry answer may name another node; a miss is `CODE_NOT_FOUND`, any other registry error `CODE_INTERNAL_ERROR` |
-| `remoteReSpawnHandler` | 1 to 7 | address built from the qualified name | `PID.Restart`; a failure is `CODE_INTERNAL_ERROR` |
+| `remoteReSpawnHandler` | 1 to 7 | address built from the qualified name | `PID.Restart` ([Chapter 4, §4.7](chap-04.md#47-looking-up-killing-and-restarting-by-name)); a failure is `CODE_INTERNAL_ERROR` |
 | `remoteStopHandler` | 1 to 7 | address built from the qualified name | `PID.Shutdown`; a failure is `CODE_INTERNAL_ERROR` |
 | `remoteReinstateHandler` | 1, 2, 4, 5, 7 | `localActor`: qualified name, then bare name | `PID.doReinstate` ([Chapter 9, §9.7](chap-09.md#97-reinstate)) |
 | `remoteWatchHandler` | 1, 2, 4, 5, 7; the watcher address must parse | `localActor` | records the watcher ([§17.8](#178-the-remote-watch-registry)) |
@@ -397,13 +413,13 @@ These serve the cluster and are described with it:
 
 ## 17.7 Grain entry points
 
-Three handlers receive grain traffic; activation, mailboxes and replies are [Chapter 14](chap-14.md), Grains: the Runtime. Each checks the type and remoting, validates the host and port carried in the wire `Grain`, and extracts the propagated context.
+Three handlers receive grain traffic; identity and activation are [Chapter 13](chap-13.md), and mailboxes and replies are [Chapter 14](chap-14.md), Grains: the Runtime (delivery from another node: [§14.12](chap-14.md#1412-delivery-from-another-node)). Each checks the type and remoting, validates the host and port carried in the wire `Grain`, and extracts the propagated context.
 
 | Handler | Then |
 |---|---|
 | `remoteAskGrainHandler` | applies the deadline; decodes the message with the composite (`CODE_INVALID_ARGUMENT` on failure); parses the identity (`CODE_INVALID_ARGUMENT`); refuses a reserved name; sends with `localSendGrain` in ask mode and the request's timeout; serialises the reply as the legacy ask does, with the same panic for a reply type that has no serializer |
 | `remoteTellGrainHandler` | decodes and parses the same way; hands a reentrancy envelope (`AsyncRequest`, `AsyncResponse`) straight to the grain's queues with `deliverAsyncEnvelope`; otherwise sends in one-way mode when `one_way` is set, which answers once the message is enqueued, and in acknowledged mode otherwise, which answers once the grain has handled it, with `DefaultGrainRequestTimeout` (five seconds) |
-| `remoteActivateGrainHandler` | applies the deadline and calls `recreateGrain`; `ErrSystemShuttingDown` is `CODE_FAILED_PRECONDITION`, any other error `CODE_INTERNAL_ERROR` |
+| `remoteActivateGrainHandler` | applies the deadline and calls `recreateGrain`, which reads the grain's dispatcher name from the wire record (an undeclared name fails the activation); `ErrSystemShuttingDown` is `CODE_FAILED_PRECONDITION`, any other error `CODE_INTERNAL_ERROR` |
 
 The comment in `remoteTellGrainHandler` explains the envelope case: the blocking send waits on channels an envelope never signals, and a response to a grain paused in stash mode must still reach it.
 
@@ -447,21 +463,21 @@ Remote watches live outside the actor tree, in one `remoteWatchRegistry` per act
 | a remote node unwatches | `removeWatcher` | `actorSystem.remoteUnWatchHandler` in `actor/remote_server.go` |
 | a local actor watches a remote one, after the other node acknowledged | `addWatchee` | `PID.Watch` in `actor/pid.go` |
 | a local actor unwatches, or stops | `removeWatchee` and a best-effort `RemoteUnWatch`: `UnWatch` removes the entry first, `freeWatchees` after the call | `PID.UnWatch` and `PID.freeWatchees` in `actor/pid.go` |
-| a local actor stops | `watchersFor`, a `Terminated` sent with `RemoteTell` to each, then `dropPID` | `PID.freeWatchers` in `actor/pid.go` |
+| a local actor stops | `watchersFor`, a `Terminated` ([Chapter 9, §9.8](chap-09.md#98-death-watch)) sent with `RemoteTell` to each, then `dropPID` | `PID.freeWatchers` in `actor/pid.go` |
 | a cluster member leaves | `dropNode` when its remoting port is known, else `dropHost` | `actorSystem.pruneRemoteWatchesForNode` in `actor/actor_system.go` |
 
 After a departure, `actorSystem.terminateRemoteWatchees` sends each local watcher of a dropped watchee a `Terminated` for the remote path, stamped with the membership event's time, with the death watch actor as sender. A watcher that is gone or not running is skipped. The dropped watcher entries need no action: the watcher is on the departed node.
 
 ## 17.9 The remote hold registry
 
-Each remote tell carries a share of its frame's credit, and the share goes back to the sender when the message leaves the mailbox ([Chapter 15, §15.8](chap-15.md#158-flow-control)). The comment in `PID.reset` in `actor/pid.go` states the problem the registry solves: a terminal stop abandons the mailbox to the garbage collector, which would strand the queued shares and shrink the peer's window for good. The registry tracks every share independently of the mailbox implementation, so teardown can repay them all, whatever mailbox held the messages.
+Each remote tell carries a share of its frame's credit, and the share goes back to the sender when the message leaves the [mailbox](chap-06.md#61-the-contract) ([Chapter 15, §15.8](chap-15.md#158-flow-control)). The comment in `PID.reset` in `actor/pid.go` states the problem the registry solves: a terminal stop abandons the mailbox to the garbage collector, which would strand the queued shares and shrink the peer's window for good. The registry tracks every share independently of the mailbox implementation, so teardown can repay them all, whatever mailbox held the messages.
 
 **Structure.** `remoteHoldRegistry` in `actor/remote_hold_registry.go` is the same intrusive multi-producer, single-consumer queue as the default mailbox: a sentinel node, a `head` and a `tail` on separate cache lines, and pooled nodes that point at the share, never at the pooled receive context. A PID creates it lazily on its first remote message, with a compare-and-swap; the losing creator returns its sentinel to the pool (`PID.trackRemoteHold` in `actor/pid.go`). Local-only actors never allocate one.
 
 **Operations:**
 
 - `track(share)` appends a node with an atomic swap of the tail and then publishes the link. Any goroutine may call it. `handleRemoteTellHeld` tracks the share **before** the message enters the mailbox, so no queued share is ever invisible to teardown.
-- `compact()` examines up to eight entries (`remoteHoldCompactBudget`) and retires the released ones. It first retires the released prefix, advancing the head, then resumes behind the `cursor` the previous pass left on a parked entry when its budget ran out, and unlinks in place every released entry it finds behind a parked one (`remoteHoldRegistry.unlink`). A parked message's entry stays until its share is released. The tail is never unlinked, because a producer may still be publishing its link; a pass that reaches the end or a released tail clears the cursor, so the next pass starts from the head and reaches the entries released since it walked past them, and `releaseAll` clears it once every node is recycled. Before the in-place unlink, a pass stopped at the first parked entry, so a message that a priority mailbox left waiting behind newer ones pinned one entry per message dispatched after it. `PID.dispatchOne` calls `compact` after it releases the departing message's share.
+- `compact()` examines up to eight entries (`remoteHoldCompactBudget`) and retires the released ones. It first retires the released prefix, advancing the head, then resumes behind the `cursor` the previous pass left on a parked entry when its budget ran out, and unlinks in place every released entry it finds behind a parked one (`remoteHoldRegistry.unlink`). A parked message's entry stays until its share is released. The tail is never unlinked, because a producer may still be publishing its link; a pass that reaches the end or a released tail clears the cursor, so the next pass starts from the head and reaches the entries released since it walked past them, and `releaseAll` clears it once every node is recycled.  A message that a priority mailbox leaves waiting behind newer ones therefore pins one entry, not one per message dispatched after it. `PID.dispatchOne` (a [turn](chap-07.md#73-one-turn) step) calls `compact` after it releases the departing message's share.
 - `releaseAll()` releases and retires every entry. When the chain looks empty but the tail has moved, a producer has swapped the tail and not yet published its link; `releaseAll` yields with `runtime.Gosched` until the link appears, so the share is not stranded.
 
 The consumer side is serialised by `consumerMu`, not by the dispatcher. The type's comment gives the reason: `Shutdown` does not wait for a running turn, so it must complete even when the actor is stuck inside `Receive`, and `compact` always finishes before user code runs, so a stuck `Receive` never holds the lock.
@@ -500,7 +516,7 @@ The consumer side is serialised by `consumerMu`, not by the dispatcher. The type
 | Truncated or inconsistent frames are rejected by all three serializers | `TestProtoSerializer_Deserialize_InvalidFrame` in `remote/proto_serializer_test.go`; `TestCBORSerializer_Deserialize_InvalidFrame` in `remote/cbor_serializer_test.go`; `TestJSONSerializer_Deserialize_InvalidFrame` in `remote/json_serializer_test.go` |
 | A `PoisonPill` is exactly the 8-byte magic, and any other 8 bytes or length is rejected | `TestPoisonPillSerializer_Serialize` and `TestPoisonPillSerializer_Deserialize` in `actor/poison_pill_serializer_test.go` |
 | `ActorState` values equal the protobuf `State` values | `TestActorState_ValuesMatchProto` in `remote/actor_state_test.go`; `TestEncodeActorState` in `internal/codec/codec_test.go` |
-| `SpawnRequest.Sanitize` trims and makes a singleton relocatable; the request types reject empty names, kinds, parents and dependency IDs; `GrainRequest.Sanitize` defaults to one second and 5 retries | `TestSpawnRequestValidateAndSanitize` and `TestSpawnChildRequestValidateAndSanitize` in `remote/spawn_request_test.go`; `TestGrainActivationRequestValidateAndSanitize` in `remote/grain_request_test.go` |
+| `SpawnRequest.Sanitize` trims and makes a singleton relocatable; `SpawnChildRequest` and `GrainRequest` reject empty names, kinds and (for children) parents, and all three reject invalid dependency IDs; `GrainRequest.Sanitize` defaults to one second and 5 retries | `TestSpawnRequestValidateAndSanitize` and `TestSpawnChildRequestValidateAndSanitize` in `remote/spawn_request_test.go`; `TestGrainActivationRequestValidateAndSanitize` in `remote/grain_request_test.go` |
 | `Peer` joins the host with the peers port and the remoting port | `TestPeerAddresses` in `remote/peer_test.go` |
 | Handlers answer a wrong request type with `CODE_INVALID_ARGUMENT`, remoting off with `CODE_FAILED_PRECONDITION`, another host with `CODE_INVALID_ARGUMENT` and a missing actor with `CODE_NOT_FOUND`; they also answer a gone PID with `CODE_NOT_FOUND` | `TestRemoteLookupHandler`, `TestRemoteReSpawnHandler`, `TestRemoteStopHandler`, `TestRemoteReinstateHandler` and `TestRemoteHandlersActorLeftTree` in `actor/remote_server_test.go` |
 | Respawn, stop, watch, unwatch, reinstate and spawn child refuse reserved names | `TestRemoteReSpawnHandler`, `TestRemoteStopHandler`, `TestRemoteWatchHandler`, `TestRemoteUnWatchHandler`, `TestRemoteReinstateHandler` and `TestRemoteSpawnChildHandler` in `actor/remote_server_test.go` |
@@ -512,6 +528,7 @@ The consumer side is serialised by `consumerMu`, not by the dispatcher. The type
 | `copyDuplexPayload` returns a copy that does not change with the pooled source | `TestCopyDuplexPayloadRetainsIndependently` in `actor/remote_server_test.go` |
 | Spawn refuses an unregistered kind, and a reliable endpoint without clustering, with `CODE_FAILED_PRECONDITION` | `TestRemoteSpawnHandler` in `actor/remote_server_test.go` |
 | Spawn errors map to `CODE_ALREADY_EXISTS`, `CODE_UNAVAILABLE` for transient cluster conditions with quorum errors normalised, and `CODE_INTERNAL_ERROR` otherwise | `TestSpawnErrorToProto` in `actor/remote_server_test.go` |
+| A remote spawn and a remote child spawn run the actor on the named dispatcher, and an undeclared name is `CODE_INTERNAL_ERROR` | `TestRemoteSpawnHandlerDispatcher` and `TestRemoteSpawnChildHandlerDispatcher` in `actor/remote_server_test.go` |
 | Spawn child answers a missing parent with `CODE_NOT_FOUND` and a kind mismatch with `CODE_FAILED_PRECONDITION` | `TestRemoteSpawnChildHandler` in `actor/remote_server_test.go` |
 | A remote watch records the watcher, reaches a child by bare and qualified name, and an unwatch of a gone actor succeeds | `TestRemoteWatchHandler` and `TestRemoteUnWatchHandler` in `actor/remote_server_test.go` |
 | A suspended child is reinstated by bare and by qualified name | `TestRemoteReinstateHandler` in `actor/remote_server_test.go` |
@@ -544,7 +561,7 @@ The consumer side is serialised by `consumerMu`, not by the dispatcher. The type
 
 | Behaviour | Source |
 |---|---|
-| The actor system never calls `Config.Validate`; an out-of-range setting is not rejected at start | `actorSystem.validate` in `actor/actor_system.go` |
+| The actor system never calls `Config.Validate`; an out-of-range setting is not rejected at construction or start | `actorSystem.validate` in `actor/actor_system.go` |
 | A `Serve` error ends the process with `os.Exit(1)` | `actorSystem.startRemoteServer` in `actor/remote_server.go` |
 | `Config.Serializer` returns the first match of a map walk; it does not rank an exact type above an interface | `Config.Serializer` in `remote/config.go` |
 | On the actor system, every protobuf message is sent with the default `ProtoSerializer`: a concrete registration for a protobuf type and a `(*proto.Message)(nil)` override are not used | `ClientSerializerOptions` in `internal/remoteclient/config.go`; `actorSystem.setupRemoting` in `actor/actor_system.go` |
@@ -553,7 +570,7 @@ The consumer side is serialised by `consumerMu`, not by the dispatcher. The type
 | The receive path tries each serializer in turn; one that accepts foreign bytes can take another's frame | `serializerDispatch.Deserialize` in `internal/remoteclient/serializer_dispatch.go` |
 | A request addressed to this node under another host or port spelling is refused with `ErrInvalidHost` | `actorSystem.validateRemoteHost` in `actor/remote_server.go` |
 | One bad message in a tell batch never fails the others; an undecodable payload or unparseable receiver is dropped with a log, not dead-lettered | `actorSystem.deliverRemoteTellBytes` and `actorSystem.deliverRemoteTellFrom` in `actor/remote_server.go` |
-| A revision-5 batch delivers each message, dead-letters an unknown receiver or bad message metadata without failing its siblings, and is dropped whole when its context extraction fails or remoting is off | `TestDuplexRemoteTellBatch` in `actor/remote_server_test.go` |
+| A revision-5 batch delivers each message, dead-letters an unknown receiver or bad message metadata without failing its siblings, and is dropped whole when its context extraction fails or remoting is off | `actorSystem.duplexRemoteTellBatch` in `actor/remote_server.go` |
 | A legacy ask batch stops at its first failure and discards the replies already computed | `actorSystem.remoteAskHandler` in `actor/remote_server.go` |
 | An ask to an actor that is not running is `CODE_INTERNAL_ERROR`, not `CODE_NOT_FOUND` | `actorSystem.remoteAskHandler` and `actorSystem.duplexRemoteAsk` in `actor/remote_server.go` |
 | An undecodable ask payload is `CODE_INVALID_ARGUMENT` on duplex, decoded before the lookup, and `CODE_INTERNAL_ERROR` on legacy, decoded by the ask itself | `actorSystem.duplexRemoteAsk` and `actorSystem.remoteAskHandler` in `actor/remote_server.go` |
@@ -563,6 +580,7 @@ The consumer side is serialised by `consumerMu`, not by the dispatcher. The type
 | A remote lookup in a cluster answers from the registry, possibly with another node's address | `actorSystem.remoteLookupHandler` in `actor/remote_server.go` |
 | A `SpawnRequest` with `Relocatable` unset spawns a non-relocatable actor | `actorSystem.remoteSpawnHandler` in `actor/remote_server.go` |
 | A remote spawn creates a zero value of the registered kind | `reflection.instantiateActor` in `actor/reflection.go` |
+| A remote singleton spawn ignores the request's dispatcher name; a non-singleton spawn or child spawn with an undeclared dispatcher fails with `CODE_INTERNAL_ERROR` | `actorSystem.remoteSpawnHandler` and `actorSystem.remoteSpawnChildHandler` in `actor/remote_server.go` |
 | A remote child must have its parent's kind and runs on the parent's own actor value | `actorSystem.remoteSpawnChildHandler` in `actor/remote_server.go` |
 | A remote spawn or child spawn under the name of a running actor answers that actor's address, not an error | `nameResolver` in `actor/spawn.go` |
 | Remote stop and respawn act on an actor that is not running; the query handlers refuse it, except the state query | `actorSystem.remoteStopHandler` and `actorSystem.remoteStateHandler` in `actor/remote_server.go` |

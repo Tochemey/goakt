@@ -58,11 +58,11 @@ Code is referred to by name and file, as in the chapters: `PID.tryPassivation` i
 
 ### What GoAkt is
 
-GoAkt is a Go library (module `github.com/tochemey/goakt/v4`) that implements the actor model. An actor is a value with three methods, `PreStart`, `Receive` and `PostStop` (`Actor` in `actor/actor.go`). It keeps private state, and the only way to reach it is to send a message to its PID.
+GoAkt is a Go library (module `github.com/tochemey/goakt/v4`) that implements the actor model. An actor is a value with three methods, `PreStart`, `Receive` and `PostStop` (`Actor` in `actor/actor.go`). It keeps private state, and the only way to reach it is to send a message to its PID ([Chapter 4](chapters/chap-04.md)).
 
 An actor does not own a goroutine. The actor system owns a fixed pool of worker goroutines, the dispatcher, and lends a worker to an actor for one turn whenever the actor has messages waiting ([Chapter 7](chapters/chap-07.md)).
 
-A message is any Go value: the API takes `any`. A local send passes the value itself and serialises nothing. A message is serialised only when it crosses the network, by a serializer chosen for its type. The `remote` package ships a protobuf serializer (the default for `proto.Message`), a CBOR serializer and a JSON serializer, and `remote.WithSerializers` registers a serializer for a concrete type or for every type that implements an interface (`remote/option.go`).
+A message is any Go value: the API takes `any`. A local send passes the value itself and serialises nothing. A message is serialised only when it crosses the network, by a serializer chosen for its type ([Chapter 17, §17.2](chapters/chap-17.md#172-serializers)). The `remote` package ships a protobuf serializer (the default for `proto.Message`), a CBOR serializer and a JSON serializer, and `remote.WithSerializers` registers a serializer for a concrete type or for every type that implements an interface (`remote/option.go`).
 
 [Chapter 1, "The model"](chapters/chap-01.md#the-model), says the same in more detail.
 
@@ -70,9 +70,9 @@ A message is any Go value: the API takes `any`. A local send passes the value it
 
 | Shape | What runs | Chapters |
 |---|---|---|
-| **Standalone** | One process, no network. Actors and grains talk in-process. | 1 to 14 |
-| **Clustered** | Nodes find each other through a discovery provider (Consul, DNS-SD, etcd, Kubernetes, mDNS, NATS, self-managed, static) and share a registry of actors and grains, so a name resolves to whichever node holds it. Clustering needs remoting (`actorSystem.setupCluster` in `actor/actor_system.go`). | 15 to 21 |
-| **Multi-datacenter** | Several clusters, each with its own discovery, linked through a control plane (NATS JetStream or etcd) that holds one leased record per datacenter. Spawning (`SpawnOn` with `WithDataCenter`), name lookup (`SendAsync`, `SendSync`), grain messaging and CRDT replication can cross datacenters. | 22; 24, [§24.9](chapters/chap-24.md#249-cluster-integration-and-multi-datacenter) |
+| **Standalone** | One process, no network. Actors and grains talk in-process. | [1](chapters/chap-01.md) to [14](chapters/chap-14.md) |
+| **Clustered** | Nodes find each other through a discovery provider (Consul, DNS-SD, etcd, Kubernetes, mDNS, NATS, self-managed, static) and share a registry of actors and grains, so a name resolves to whichever node holds it. Clustering needs remoting (`actorSystem.setupCluster` in `actor/actor_system.go`). | [15](chapters/chap-15.md) to [21](chapters/chap-21.md) |
+| **Multi-datacenter** | Several clusters, each with its own discovery, linked through a control plane (NATS JetStream or etcd) that holds one leased record per datacenter. Spawning (`SpawnOn` with `WithDataCenter`), name lookup (`SendAsync`, `SendSync`), grain messaging and CRDT replication can cross datacenters. | [22](chapters/chap-22.md); [24](chapters/chap-24.md), [§24.9](chapters/chap-24.md#249-cluster-integration-and-multi-datacenter) |
 
 Remoting can also be enabled without a cluster: PIDs can then point at actors on other nodes, but there is no shared registry.
 
@@ -80,18 +80,18 @@ Remoting can also be enabled without a cluster: PIDs can then point at actors on
 
 | Concept | What it is | Chapter |
 |---|---|---|
-| **Actor** | A value implementing `PreStart`, `Receive` and `PostStop`. Handles one message at a time. | 1 |
-| **ActorSystem** | The runtime that hosts actors and wires every subsystem together. One interface, one implementation, `actorSystem` in `actor/actor_system.go`. | 3 |
-| **PID** | The handle to an actor, local or on another node (`PID.IsRemote`). Every send goes through one. | 4 |
-| **Address** | `goakt://<system>@<host>:<port>/<qualified name>` plus an incarnation ID. The qualified name is the key of the cluster registry. | 4, [§4.5](chapters/chap-04.md#45-names-addresses-and-identity) |
-| **Mailbox** | The per-actor queue of user messages. Control messages go to a separate system queue. | 6; 7, [§7.4](chapters/chap-07.md#74-the-system-queue) |
-| **Dispatcher** | The fixed pool of workers that runs actors and grains one turn at a time. | 7 |
-| **Supervisor** | The failure policy an actor is spawned with. The failing actor's own supervisor picks the directive; its parent carries it out. | 9 |
-| **Passivation** | Stopping an idle actor according to its strategy. The default is two minutes of idleness. | 10 |
-| **Grain** | A virtual actor addressed by identity, activated on first message and deactivated when idle. | 13 to 14 |
-| **Registry** | The cluster-wide map from actor qualified names and grain identities to the node that holds them, stored in Olric. | 20, [§20.4](chapters/chap-20.md#204-the-registry) |
-| **CRDT, Replicator** | Conflict-free replicated data types (`crdt`), held and merged by one Replicator actor per node. Eventually consistent, and separate from the registry. | 24 |
-| **Stream** | A `Source`, optional `Flow` stages and a `Sink`, materialised by `RunnableGraph.Run` on an actor system. Every stage is an actor; demand flows upstream. | 25 |
+| **Actor** | A value implementing `PreStart`, `Receive` and `PostStop`. Handles one message at a time. | [1](chapters/chap-01.md) |
+| **ActorSystem** | The runtime that hosts actors and wires every subsystem together. One interface, one implementation, `actorSystem` in `actor/actor_system.go`. | [3](chapters/chap-03.md) |
+| **PID** | The handle to an actor, local or on another node (`PID.IsRemote`). Every send goes through one. | [4](chapters/chap-04.md) |
+| **Address** | `goakt://<system>@<host>:<port>/<qualified name>` plus an incarnation ID. The qualified name is the key of the cluster registry. | [4](chapters/chap-04.md), [§4.5](chapters/chap-04.md#45-names-addresses-and-identity) |
+| **Mailbox** | The per-actor queue of user messages. Control messages go to a separate system queue. | [6](chapters/chap-06.md); [7](chapters/chap-07.md), [§7.4](chapters/chap-07.md#74-the-system-queue) |
+| **Dispatcher** | The fixed pool of workers that runs actors and grains one turn at a time. | [7](chapters/chap-07.md) |
+| **Supervisor** | The failure policy an actor is spawned with. The failing actor's own supervisor picks the directive; its parent carries it out. | [9](chapters/chap-09.md) |
+| **Passivation** | Stopping an idle actor according to its strategy. The default is two minutes of idleness. | [10](chapters/chap-10.md) |
+| **Grain** | A virtual actor addressed by identity, activated on first message and deactivated when idle. | [13](chapters/chap-13.md) to [14](chapters/chap-14.md) |
+| **Registry** | The cluster-wide map from actor qualified names and grain identities to the node that holds them, stored in Olric. | [20](chapters/chap-20.md), [§20.4](chapters/chap-20.md#204-the-registry) |
+| **CRDT, Replicator** | Conflict-free replicated data types (`crdt`), held and merged by one Replicator actor per node. Eventually consistent, and separate from the registry. | [24](chapters/chap-24.md) |
+| **Stream** | A `Source`, optional `Flow` stages and a `Sink`, materialised by `RunnableGraph.Run` on an actor system. Every stage is an actor; demand flows upstream. | [25](chapters/chap-25.md) |
 
 ### The pieces of one node
 
@@ -145,23 +145,23 @@ The repository is organised by package. `actor` holds almost half of the hand-wr
 
 | Package | Role | Chapter |
 |---|---|---|
-| `actor` | The hub: actor system, PID, mailboxes, dispatcher, supervision, passivation, scheduler, routers, grains, remoting handlers, cluster glue, relocation, reliable delivery, the CRDT Replicator. | 3 to 14, 17, 20 to 24 |
-| `remote` | Public remoting configuration (`Config`, options, compression, protocol pin), the `Serializer` interface and the protobuf, CBOR and JSON serializers, the context propagator, and the types the remoting API takes and returns: `SpawnRequest`, `SpawnChildRequest`, `GrainRequest`, `ActorState`, `Peer` and the reliable-delivery spec of a spawn request. | 17 |
-| `client` | A client for programs outside any actor system. `Client` offers `Tell`, `Ask`, `Spawn`, `SpawnBalanced`, `ReSpawn`, `Stop`, `Exists`, `Reinstate`, `Kinds`, `TellGrain` and `AskGrain`, and picks a node with a `Balancer`: round robin, random or least load. | 18 |
-| `discovery`, `discovery/*` | The `Provider` interface and eight providers. | 19 |
-| `datacenter`, `datacenter/controlplane/*` | Datacenter metadata and records, configuration, the `ControlPlane` interface, and control planes on NATS JetStream and etcd. | 22 |
-| `crdt` | CRDT types, keys, `Config` and the Replicator's messages. Imports nothing else from the module. | 24 |
-| `stream` | Reactive streams built on actors. | 25 |
-| `supervisor`, `passivation`, `reentrancy` | Configuration values the actor package accepts. | 9, 10, 8 |
-| `eventstream` | In-process publish/subscribe, used for system events. | 11, [§11.3](chapters/chap-11.md#113-the-event-stream) |
-| `extension` | The `Extension` and `Dependency` interfaces. | 12 |
-| `log` | The logging interface, with zap (the default), slog and discard implementations. | 12, [§12.5](chapters/chap-12.md#125-logging) |
+| `actor` | The hub: actor system, PID, mailboxes, dispatcher, supervision, passivation, scheduler, routers, grains, remoting handlers, cluster glue, relocation, reliable delivery, the CRDT Replicator. | [3](chapters/chap-03.md) to [14](chapters/chap-14.md), [17](chapters/chap-17.md), [20](chapters/chap-20.md) to [24](chapters/chap-24.md) |
+| `remote` | Public remoting configuration (`Config`, options, compression, protocol pin), the `Serializer` interface and the protobuf, CBOR and JSON serializers, the context propagator, and the types the remoting API takes and returns: `SpawnRequest`, `SpawnChildRequest`, `GrainRequest`, `ActorState`, `Peer` and the reliable-delivery spec of a spawn request. | [17](chapters/chap-17.md) |
+| `client` | A client for programs outside any actor system. `Client` offers `Tell`, `Ask`, `Spawn`, `SpawnBalanced`, `ReSpawn`, `Stop`, `Exists`, `Reinstate`, `Kinds`, `TellGrain` and `AskGrain`, and picks a node with a `Balancer`: round robin, random or least load. | [18](chapters/chap-18.md) |
+| `discovery`, `discovery/*` | The `Provider` interface and eight providers. | [19](chapters/chap-19.md) |
+| `datacenter`, `datacenter/controlplane/*` | Datacenter metadata and records, configuration, the `ControlPlane` interface, and control planes on NATS JetStream and etcd. | [22](chapters/chap-22.md) |
+| `crdt` | CRDT types, keys, `Config` and the Replicator's messages. Imports nothing else from the module. | [24](chapters/chap-24.md) |
+| `stream` | Reactive streams built on actors. | [25](chapters/chap-25.md) |
+| `supervisor`, `passivation`, `reentrancy` | Configuration values the actor package accepts. | [9](chapters/chap-09.md), [10](chapters/chap-10.md), [8](chapters/chap-08.md) |
+| `eventstream` | In-process publish/subscribe, used for system events. | [11](chapters/chap-11.md), [§11.3](chapters/chap-11.md#113-the-event-stream) |
+| `extension` | The `Extension` and `Dependency` interfaces. | [12](chapters/chap-12.md) |
+| `log` | The logging interface, with zap (the default), slog and discard implementations. | [12](chapters/chap-12.md), [§12.5](chapters/chap-12.md#125-logging) |
 | `errors` | Sentinel errors and error types used across the module. | none |
-| `hash` | The `Hasher` that maps registry keys to cluster partitions; xxh3 by default (`ClusterConfig.WithPartitionHasher` in `actor/cluster_config.go`). | 20, [§20.7](chapters/chap-20.md#207-partition-hashing) |
-| `tls` | `Info`, the TLS configuration for remoting and the cluster. | 18 |
-| `breaker` | A circuit breaker, used by the `PipeTo` family: `PipeTo` and `PipeToName` on a PID or a `ReceiveContext`, and the grain context's `PipeToGrain`, `PipeToSelf` and `PipeToActor` (`WithCircuitBreaker` in `actor/pipe_option.go`). | 26 |
-| `memory` | Total and free memory of the host, and the bytes in use on the process's Go heap (`Used`). Read only for the actor system's `Metric`; placement does not use them. | 26 |
-| `testkit` | Helpers for actor and cluster tests (see [Testing strategy](#testing-strategy)). | 26 |
+| `hash` | The `Hasher` that maps registry keys to cluster partitions; xxh3 by default (`ClusterConfig.WithPartitionHasher` in `actor/cluster_config.go`). | [20](chapters/chap-20.md), [§20.7](chapters/chap-20.md#207-partition-hashing) |
+| `tls` | `Info`, the TLS configuration for remoting and the cluster. | [18](chapters/chap-18.md) |
+| `breaker` | A circuit breaker, used by the `PipeTo` family: `PipeTo` and `PipeToName` on a PID or a `ReceiveContext`, and the grain context's `PipeToGrain`, `PipeToSelf` and `PipeToActor` (`WithCircuitBreaker` in `actor/pipe_option.go`). | [26](chapters/chap-26.md) |
+| `memory` | Total and free memory of the host, and the bytes in use on the process's Go heap (`Used`). Read only for the actor system's `Metric`; placement does not use them. | [26](chapters/chap-26.md) |
+| `testkit` | Helpers for actor and cluster tests (see [Testing strategy](#testing-strategy)). | [26](chapters/chap-26.md) |
 
 ### Internal packages
 
@@ -174,13 +174,13 @@ The repository is organised by package. `actor` holds almost half of the hand-wr
 | `internal/internalpb` | Code generated from `protos/internal/*.proto`. |
 | `internal/commands` | Internal messages that are not protobuf: `Panicking`, dead-letter commands, reentrancy envelopes, reliable-delivery commands, and their serializers. |
 | `internal/codec` | Converts spawn options, supervisors and similar values to and from protobuf; datacenter records (`EncodeDataCenterRecord`, `DecodeDataCenterRecord`); CRDT keys ([Chapter 17, §17.10](chapters/chap-17.md#1710-internalcodec)). |
-| `internal/ddata` | CRDT value encoding and the BoltDB snapshot store ([Chapter 24](chapters/chap-24.md)). |
+| `internal/ddata` | CRDT value encoding and the BoltDB snapshot store ([Chapter 24, §24.8](chapters/chap-24.md#248-snapshots)). |
 | `internal/datacentercontroller` | The datacenter controller: registers the local record, heartbeats it and caches the active records ([Chapter 22, §22.7](chapters/chap-22.md#227-the-datacenter-controller)-[§22.8](chapters/chap-22.md#228-the-cache-of-active-datacenters)). |
 | `internal/refusal` | Marks the error with which a node refused a grain message before any handler ran it, so the sender knows the message did not run ([Chapter 13, §13.7](chapters/chap-13.md#137-when-the-recorded-owner-is-gone)). |
 | `internal/metric` | OpenTelemetry instruments ([Chapter 12, §12.4](chapters/chap-12.md#124-opentelemetry-instruments)). |
-| `internal/chain` | Runs a sequence of steps fail-fast or run-all; used by start and stop ([Chapter 3](chapters/chap-03.md)). |
-| `internal/future`, `internal/pendingasks`, `internal/retry` | Futures for `PipeTo` and grains; the table of callers waiting for an asynchronous reply; retry with exponential backoff. |
-| `internal/chunk`, `internal/queue`, `internal/quorum`, `internal/xsync` | Splitting a slice into batches (relocation); the queue behind event-stream subscribers; classifying Olric quorum errors; concurrent maps, lists and a TTL map. |
+| `internal/chain` | Runs a sequence of steps fail-fast or run-all; used by the actor system's start and stop ([Chapter 3, §3.3](chapters/chap-03.md#33-start)) and by the client. |
+| `internal/future`, `internal/pendingasks`, `internal/retry` | Futures for `PipeTo` and grains ([Chapter 5, §5.7](chapters/chap-05.md#57-pipeto)); the table of callers waiting for an asynchronous reply; retry with exponential backoff. |
+| `internal/chunk`, `internal/queue`, `internal/quorum`, `internal/xsync` | Splitting a slice into batches (relocation, [Chapter 21, §21.10](chapters/chap-21.md#2110-inside-one-relocation)); the queue behind event-stream subscribers ([Chapter 11, §11.3](chapters/chap-11.md#113-the-event-stream)); classifying Olric quorum errors ([Chapter 20](chapters/chap-20.md)); concurrent maps, lists and a TTL map. |
 | Small helpers | `duration`, `id`, `locker` (`NoCopy`), `memberlist` (TLS transport, [Chapter 19, §19.6](chapters/chap-19.md#196-the-tls-transport)), `pause`, `pointer`, `size`, `slices`, `strconvx`, `ticker`, `timer`, `tlstest` (test fixtures), `types`, `validation`. |
 
 ### Everything else
@@ -193,17 +193,20 @@ The repository is organised by package. `actor` holds almost half of the hand-wr
 
 ```mermaid
 flowchart TD
-    Send["Tell / Ask"] --> DoReceive["PID.doReceive"]
+    Send["Tell / Ask"] --> Fast{"Tell, default mailbox,<br/>ordinary message?"}
+    Fast -->|"yes"| Put["PID.putValue stores the message<br/>in a mailbox slot"]
+    Fast -->|"no"| DoReceive["PID.doReceive<br/>(pooled ReceiveContext)"]
     DoReceive --> Control{"control message?"}
     Control -->|"yes"| SysQueue["system queue"]
     Control -->|"no"| Mailbox["mailbox"]
-    SysQueue -->|"the producer wins Idle → Scheduled"| Ready["dispatcher ready queue"]
+    Put -->|"the producer wins Idle → Scheduled"| Ready["dispatcher ready queue"]
+    SysQueue -->|"the producer wins Idle → Scheduled"| Ready
     Mailbox -->|"the producer wins Idle → Scheduled"| Ready
     Ready --> Turn["worker runs a turn:<br/>up to the throughput budget (32 by default),<br/>control messages first"]
     Turn --> Receive["Receive"]
 ```
 
-`Tell` and `Ask` take a pooled `ReceiveContext` and hand it to `PID.doReceive`, which refuses ordinary messages while the system stops and otherwise routes control messages to the system queue and the rest to the mailbox ([Chapter 1, "How a message reaches `Receive`"](chapters/chap-01.md#how-a-message-reaches-receive)). The producer that moves the actor from idle to scheduled pushes it onto the ready queue ([Chapter 7, §7.2](chapters/chap-07.md#72-the-dispatch-state), [§7.5](chapters/chap-07.md#75-the-ready-queue)). A worker runs one turn and then yields ([Chapter 7, §7.3](chapters/chap-07.md#73-one-turn)). An `Ask` carries its deadline, a turn skips an `Ask` whose sender has stopped waiting, and the reply goes back through `ctx.Response` ([Chapter 5, §5.2](chapters/chap-05.md#52-what-a-message-carries)-[§5.3](chapters/chap-05.md#53-how-a-reply-gets-back)). A failure in `Receive` leaves the turn and goes to supervision ([Chapter 7, §7.6](chapters/chap-07.md#76-failures-leave-the-turn); [Chapter 9](chapters/chap-09.md)).
+A local `Tell` to an actor on the default mailbox stores the message, its sender and its context straight into a mailbox slot with `PID.putValue`. Every other send, an `Ask` among them, takes a pooled `ReceiveContext` and hands it to `PID.doReceive`, which refuses ordinary messages while the system stops and otherwise routes control messages to the system queue and the rest to the mailbox ([Chapter 1, "How a message reaches `Receive`"](chapters/chap-01.md#how-a-message-reaches-receive); [Chapter 6, §6.2](chapters/chap-06.md#62-the-default-mailbox)). The producer that moves the actor from idle to scheduled pushes it onto the ready queue ([Chapter 7, §7.2](chapters/chap-07.md#72-the-dispatch-state), [§7.5](chapters/chap-07.md#75-the-ready-queue)). A worker runs one turn and then yields ([Chapter 7, §7.3](chapters/chap-07.md#73-one-turn)). An `Ask` carries its deadline, a turn skips an `Ask` whose sender has stopped waiting, and the reply goes back through `ctx.Response` ([Chapter 5, §5.2](chapters/chap-05.md#52-what-a-message-carries)-[§5.3](chapters/chap-05.md#53-how-a-reply-gets-back)). A failure in `Receive` leaves the turn and goes to supervision ([Chapter 7, §7.6](chapters/chap-07.md#76-failures-leave-the-turn); [Chapter 9](chapters/chap-09.md)).
 
 ### Remote tell and ask
 
@@ -239,9 +242,9 @@ sequenceDiagram
 
 ### Spawning
 
-`ActorSystem.Spawn` (`actor/spawn.go`) checks that the system runs and the options are valid, then serialises concurrent spawns of one name in a `singleflight.Group`. In cluster mode it asks the registry whether the name is taken. It then checks the local tree, builds the PID with `newPID`, which runs `PreStart` with retries, attaches the PID under the user guardian with the death watch watching it, in cluster mode writes the registry record synchronously, and only then schedules the turn that delivers `PostStart`, before returning. `PostStart` is the actor's first message and, except for the attach window described in [Chapter 4, §4.3](chapters/chap-04.md#poststart-is-always-the-first-message), means the actor is fully started, registry record included ([Chapter 4, §4.2](chapters/chap-04.md#42-the-local-spawn-path-step-by-step)-[§4.4](chapters/chap-04.md#44-prestart-retries-and-the-timeout-that-is-not-one)).
+`ActorSystem.Spawn` (`actor/spawn.go`) checks that the system runs and the options are valid, then coalesces concurrent spawns of one name in a `spawnActivationGroup` (`actor/spawn_activation.go`), the part of singleflight a spawn needs. In cluster mode it asks the registry whether the name is taken. It then checks the local tree, builds the PID with `newPID`, which runs `PreStart` with retries, attaches the PID under the user guardian and marks it for the death watch, in cluster mode writes the registry record synchronously, and only then schedules the turn that delivers `PostStart`, before returning. `PostStart` is the actor's first message and, except for the attach window described in [Chapter 4, §4.3](chapters/chap-04.md#poststart-is-always-the-first-message), means the actor is fully started, registry record included ([Chapter 4, §4.2](chapters/chap-04.md#42-the-local-spawn-path-step-by-step)-[§4.4](chapters/chap-04.md#44-prestart-retries-and-the-timeout-that-is-not-one)).
 
-`SpawnOn` lets the cluster place an actor: it reads the members, the calling node included, picks one with a placement strategy (`SpawnPlacement` in `actor/spawn_option.go`) and sends it a `RemoteSpawn` control request, even when the pick is the calling node. With `Local` placement, outside a cluster or with no member, it calls `Spawn` instead ([Chapter 21, §21.1](chapters/chap-21.md#211-placement-with-spawnon)). The target instantiates the actor from its registered kind (`reflection.instantiateActor`, called by `actorSystem.remoteSpawnHandler` in `actor/remote_server.go`) and runs its own spawn ([Chapter 17, §17.6](chapters/chap-17.md#176-actor-lifecycle-and-query-handlers)). `SpawnSingleton` places a cluster singleton on the coordinator, or with a role on the oldest member advertising it (`actorSystem.SpawnSingleton` in `actor/spawn.go`; [Chapter 21, §21.4](chapters/chap-21.md#214-cluster-singletons)).
+`SpawnOn` lets the cluster place an actor: it reads the members, the calling node included, picks one with a placement strategy (`SpawnPlacement` in `actor/spawn_option.go`) and sends it a `RemoteSpawn` control request, even when the pick is the calling node. With `Local` placement, with `HashBased` placement when the calling node owns the name's partition, outside a cluster or with no member, it calls `Spawn` instead; with `WithDataCenter` it sends the request to a node of another datacenter ([Chapter 21, §21.1](chapters/chap-21.md#211-placement-with-spawnon); [Chapter 22, §22.10](chapters/chap-22.md#2210-cross-datacenter-operations)). The target instantiates the actor from its registered kind (`reflection.instantiateActor`, called by `actorSystem.remoteSpawnHandler` in `actor/remote_server.go`) and runs its own spawn ([Chapter 17, §17.6](chapters/chap-17.md#176-actor-lifecycle-and-query-handlers)). `SpawnSingleton` places a cluster singleton on the coordinator, or with a role on the oldest member advertising it (`actorSystem.SpawnSingleton` in `actor/spawn.go`; [Chapter 21, §21.4](chapters/chap-21.md#214-cluster-singletons)).
 
 ### Grain activation
 
@@ -259,13 +262,13 @@ Outside a cluster the grain is found or activated on this node. `GrainOf` activa
 Olric emits membership changes on its cluster events channel. The cluster engine holds each join or departure until a converged routing table reflects it, at most `WithConvergenceTimeout` (ten seconds by default), then delivers `NodeJoined` or `NodeLeft`; it detects a change of coordinator itself and delivers `LeaderChanged` ([Chapter 20, §20.9](chapters/chap-20.md#209-cluster-events)). `actorSystem.handleClusterEvent` (`actor/actor_system.go`) publishes each event on the event stream and acts on joins and departures ([Chapter 20, §20.10](chapters/chap-20.md#2010-the-actor-system-on-the-engine)):
 
 - **On `NodeJoined`**, every node refreshes its cache from peers address to remoting port, closes the handoff window of a node that rejoined at the same address, tries to open the grain activation barrier and triggers datacenter reconciliation. It does not rewrite the registry: Olric migrates partition data to the joining node.
-- **On `NodeLeft`**, every node closes its remoting peer for the departed node, prunes the remote watches pointing at it, re-puts its own actors and grains when the departures may have lost registry partitions (`resyncAfterClusterEvent`), and triggers datacenter reconciliation. With relocation enabled (the default) it then opens the handoff window, and the leader relocates the departed node's actors and grains while every other node deletes its copy of that node's peer state ([Chapter 21, §21.6](chapters/chap-21.md#216-what-every-node-does-on-nodeleft)).
+- **On `NodeLeft`**, every node closes its remoting peer for the departed node, prunes the remote watches pointing at it, re-puts its own actors and grains when registry partitions may have been lost (`resyncAfterClusterEvent`: always with a replica count of 1, otherwise once `replicaCount` nodes have departed within the correlated-departure window; [Chapter 21, §21.6](chapters/chap-21.md#216-what-every-node-does-on-nodeleft)), and triggers datacenter reconciliation. With relocation enabled (the default) it then opens the handoff window, and the leader relocates the departed node's actors and grains while every other node deletes its copy of that node's peer state ([Chapter 21, §21.6](chapters/chap-21.md#216-what-every-node-does-on-nodeleft)).
 
 **Relocation, on the leader.** After a graceful leave, the leader takes the relocation set from the peer-state snapshot the departed node sent to its oldest peers before leaving, read from the leader's own local store ([Chapter 21, §21.8](chapters/chap-21.md#218-graceful-leave-the-peer-state-snapshot)). After a crash there is no snapshot: the leader waits for Olric's partition repair to go quiet, skips a node that is a member again, derives the set by scanning the registry for the node's host and remoting port, and releases the registry claims of its non-relocatable actors ([Chapter 21, §21.7](chapters/chap-21.md#217-crash-deriving-the-relocation-set-from-the-registry)). Either way one job runs per departed address. The relocator system actor starts a worker that sends singletons to the leader, which re-establishes them through the singleton spawn path, and every other actor to the least-loaded survivor with the actor's role; it recreates the leader's share locally and sends each peer its share in `RelocateBatch` requests of at most 500 items ([Chapter 21, §21.9](chapters/chap-21.md#219-the-relocator-and-its-workers)-[§21.10](chapters/chap-21.md#2110-inside-one-relocation)). A lazy grain, the default, only has its registry entry released and is activated again on its next message; an eager grain is reactivated at once ([Chapter 21, §21.11](chapters/chap-21.md#2111-grain-relocation)). A relocated actor is a new incarnation: `PreStart` runs again and nothing in its memory or mailbox survives ([Chapter 21, §21.3](chapters/chap-21.md#213-what-relocates)).
 
 ### CRDT replication
 
-Each node with CRDTs enabled (`ClusterConfig.WithCRDT`, and the node's role matching `crdt.WithRole`) runs one Replicator actor, `GoAktReplicator`, which owns the local store ([Chapter 24, §24.3](chapters/chap-24.md#243-the-replicator)). A local `Update` applies at once and the Replicator publishes the delta through the topic actor on `goakt.crdt.deltas`, which delivers it to every peer's Replicator ([§24.4](chapters/chap-24.md#244-replication-through-the-topic-actor)). On every anti-entropy tick a node sends its digest to one random peer and pulls back the keys whose content hash differs; tombstones in the digest carry deletions ([§24.5](chapters/chap-24.md#245-anti-entropy)). `WriteTo` and `ReadFrom` add direct, best-effort peer calls ([§24.6](chapters/chap-24.md#246-consistency-model)). Across datacenters, every Replicator buffers one pending entry per key, the cluster leader flushes the buffer to each remote datacenter and tracks what each one accepted, and a cross-datacenter anti-entropy round repairs what the flush missed ([§24.9](chapters/chap-24.md#249-cluster-integration-and-multi-datacenter)). See [Chapter 24](chapters/chap-24.md).
+Each node with CRDTs enabled (`ClusterConfig.WithCRDT`, and the node's role matching `crdt.WithRole`) runs one Replicator actor, `GoAktReplicator`, which owns the local store ([Chapter 24, §24.3](chapters/chap-24.md#243-the-replicator)). A local `Update` applies at once and the Replicator publishes the delta through the topic actor on `goakt.crdt.deltas`, which delivers it to every peer's Replicator ([§24.4](chapters/chap-24.md#244-replication-through-the-topic-actor)). On every anti-entropy tick a node sends its digest to one random peer and pulls back the keys whose content hash differs; tombstones in the digest carry deletions ([§24.5](chapters/chap-24.md#245-anti-entropy)). `WriteTo` and `ReadFrom` add direct, best-effort peer calls ([§24.6](chapters/chap-24.md#246-consistency-model)). With `crdt.WithDataCenterReplication`, every Replicator buffers one pending entry per key, the cluster leader flushes the buffer to each remote datacenter and tracks what each one accepted, and, with `crdt.WithDataCenterAntiEntropy`, a cross-datacenter anti-entropy round repairs what the flush missed ([§24.9](chapters/chap-24.md#249-cluster-integration-and-multi-datacenter)). See [Chapter 24](chapters/chap-24.md).
 
 ### Streams
 
@@ -285,7 +288,7 @@ The cost: a remote message must have a registered serializer. `RemoteTell` and `
 
 ### Why a fixed dispatcher pool
 
-Actors are scheduled onto a pool of `max(GOMAXPROCS, 2)` workers instead of a goroutine each, as in Akka, Pekko, Erlang and Orleans. The number of goroutines stays near the worker count instead of growing with the number of active actors, and a per-turn budget of 32 messages bounds how long one actor holds a worker. The cost is that a handler that blocks holds its worker for the whole wait. [Chapter 7, §7.1](chapters/chap-07.md#71-the-pieces) gives the measured trade-offs of a larger pool.
+Actors are scheduled onto a pool of `max(GOMAXPROCS, 2)` workers instead of a goroutine each, as in Akka, Pekko, Erlang and Orleans. The number of goroutines stays near the worker count instead of growing with the number of active actors, and a per-turn budget of 32 messages bounds how long one actor holds a worker. The cost is that a handler that blocks holds its worker for the whole wait. [Chapter 7, §7.1](chapters/chap-07.md#71-the-pieces) gives the measured trade-offs of a larger pool; a group of blocking actors can be given a pool of its own with a named dispatcher ([Chapter 7, named dispatchers](chapters/chap-07.md#named-dispatchers)).
 
 ### Why a custom TCP protocol instead of gRPC
 
@@ -320,7 +323,7 @@ Both live in one library and share the dispatcher. [Chapter 13, §13.9](chapters
 
 ### One worker per actor at a time
 
-At most one worker runs an actor at any moment, so an actor's own state needs no lock. Each PID has a dispatch state, `Idle`, `Scheduled` or `Processing`, changed only by compare-and-swap or by the party that owns the transition; only `Processing` allows a handler to run ([Chapter 7, §7.2](chapters/chap-07.md#72-the-dispatch-state)). `TestDispatchStateHappyPath` in `actor/dispatch_state_test.go` and `TestRestartNeverRunsTwoTurns` in `actor/pid_test.go` enforce it. Grains follow the same rule ([Chapter 14, §14.3](chapters/chap-14.md#143-scheduling-and-the-turn)).
+At most one worker runs an actor at any moment, so an actor's own state needs no lock. Each PID has a dispatch state, `Idle`, `Scheduled` or `Processing`, changed only by compare-and-swap or by the party that owns the transition; only `Processing` allows a handler to run ([Chapter 7, §7.2](chapters/chap-07.md#72-the-dispatch-state)). `TestDispatchStateHappyPath` in `actor/dispatch_state_test.go` checks the transitions and `TestRestartNeverRunsTwoTurns` in `actor/pid_test.go` that restarts never overlap two turns. Grains follow the same rule ([Chapter 14, §14.3](chapters/chap-14.md#143-scheduling-and-the-turn)).
 
 ### Message ordering
 
@@ -333,17 +336,17 @@ Messages from one sender to one actor with a FIFO mailbox are handled in the ord
 
 ### Goroutines
 
-No actor or grain has a goroutine of its own. The long-lived goroutines are the dispatcher workers, one supervision consumer, one passivation manager, the eviction loop when an eviction strategy is set, the scheduler's own, the cluster events loop in cluster mode ([Chapter 7, §7.1](chapters/chap-07.md#71-the-pieces)), and the remoting client's tell-failure drain ([Chapter 16, §16.7](chapters/chap-16.md#167-sending-a-tell)). Some work does start goroutines: request timeouts ([Chapter 8, §8.5](chapters/chap-08.md#85-reentrancy-requests-that-do-not-block)), `PipeTo` tasks ([Chapter 5, §5.7](chapters/chap-05.md#57-pipeto)), supervised restarts ([Chapter 9, §9.4](chapters/chap-09.md#94-restart-budget-backoff-and-retries)), and on the transport, one reader and one writer per duplex connection ([Chapter 15, §15.3](chapters/chap-15.md#153-architecture)).
+No actor or grain has a goroutine of its own. The long-lived goroutines are the dispatcher workers, one supervision consumer per dispatcher, one passivation manager, the eviction loop when an eviction strategy is set, the scheduler's own, the cluster events loop in cluster mode ([Chapter 7, §7.1](chapters/chap-07.md#71-the-pieces)), and the remoting client's tell-failure drain ([Chapter 16, §16.7](chapters/chap-16.md#167-sending-a-tell)). Some work does start goroutines: request timeouts ([Chapter 8, §8.5](chapters/chap-08.md#85-reentrancy-requests-that-do-not-block)), `PipeTo` tasks ([Chapter 5, §5.7](chapters/chap-05.md#57-pipeto)), supervised restarts ([Chapter 9, §9.4](chapters/chap-09.md#94-restart-budget-backoff-and-retries)), and on the transport, one reader and one writer per duplex connection ([Chapter 15, §15.3](chapters/chap-15.md#153-architecture)).
 
 ### State shared between goroutines
 
 - **PID.** The lifecycle flags are one atomic bitmask; the dispatch state is a separate atomic word. `fieldsLocker` guards the fields that change after construction, and `stopLocker` makes sure `PostStop` runs once. The send path takes neither lock ([Chapter 4, §4.3](chapters/chap-04.md#43-inside-newpid)).
-- **Actor system.** Flags and counters are atomics; `locker` guards fields replaced at run time; single structures have their own mutexes ([Chapter 3, §3.1](chapters/chap-03.md#31-one-interface-one-struct)). The actor tree is one read-write mutex over three indexes ([Chapter 3, §3.4](chapters/chap-03.md#34-the-guardian-tree)).
+- **Actor system.** Flags and counters are atomics; `locker` guards fields replaced at run time; single structures have their own mutexes ([Chapter 3, §3.1](chapters/chap-03.md#31-one-interface-one-struct)). The actor tree has no lock of its own: three indexes, each split into 64 shards with a lock apiece, and the parent and watch relationships on the nodes, each under that node's mutex ([Chapter 3, §3.4](chapters/chap-03.md#how-the-tree-stores-it)).
 - **Contracts on user code.** An extension is called from many workers at once and must be safe for concurrent use ([Chapter 12, §12.1](chapters/chap-12.md#121-extensions)). So must a serializer (`Serializer` in `remote/serializer.go`). A custom mailbox must accept concurrent `Enqueue` calls ([Chapter 6, §6.9](chapters/chap-06.md#69-writing-your-own-mailbox)). A `ReceiveContext` belongs to one message and is recycled after it ([Chapter 8, §8.1](chapters/chap-08.md#81-one-object-per-message)).
 
 ### Reentrancy
 
-With `reentrancy.Off`, the default, `ctx.Request` is refused and an actor handles one message at a time, start to finish. With `AllowAll`, an actor that has sent a request keeps handling every message until the reply arrives, so its state may change in between. With `StashNonReentrant`, user messages are stashed until the last stash-mode request completes. Nothing interrupts a running handler, and one worker runs the actor at a time in every mode; what changes is which messages may run while a request is pending ([Chapter 8](chapters/chap-08.md), [§8.5](chapters/chap-08.md#85-reentrancy-requests-that-do-not-block); grains in [§8.6](chapters/chap-08.md#86-reentrancy-in-grains)).
+Reentrancy is opt-in (`WithReentrancy` at spawn). With `reentrancy.Off`, the default, `ctx.Request` is refused and an actor handles one message at a time, start to finish. With `AllowAll`, an actor that has sent a request keeps handling every message until the reply arrives, so its state may change in between. With `StashNonReentrant`, user messages are stashed until the last stash-mode request completes. Nothing interrupts a running handler, and one worker runs the actor at a time in every mode; what changes is which messages may run while a request is pending ([Chapter 8](chapters/chap-08.md), [§8.5](chapters/chap-08.md#85-reentrancy-requests-that-do-not-block); grains in [§8.6](chapters/chap-08.md#86-reentrancy-in-grains)).
 
 ## Startup and shutdown
 
@@ -351,7 +354,7 @@ With `reentrancy.Off`, the default, `ctx.Request` is refused and an actor handle
 
 `ActorSystem.Start` (`actor/actor_system.go`) runs in three phases ([Chapter 3, §3.3](chapters/chap-03.md#33-start)):
 
-1. **Before the chain.** Create the scheduler and start the dispatcher's workers, replacing a dispatcher that a previous stop closed.
+1. **Before the chain.** Create the scheduler and start the workers of the default dispatcher and of every named one, replacing a dispatcher that a previous stop closed.
 2. **The startup chain**, fail-fast: set up the remoting client and the cluster engine; spawn the root guardian, system guardian, NoSender, user guardian, death watch and dead letter; then, by feature, the singleton manager, relocator and topic actor; start the remote server; join the cluster; then the datacenter controller and leader-watch steps, which return at once because the system is not yet marked running ([Chapter 22, §22.9](chapters/chap-22.md#229-the-actor-systems-side)).
 3. **After the chain.** Start the scheduler, spawn the Replicator, start the passivation manager and the eviction loop, mark the system started, record the start time, register metrics.
 
@@ -359,7 +362,7 @@ The order encodes dependencies: every PID needs the remoting client, every syste
 
 ### Stop
 
-`ActorSystem.Stop` is `shutdown` ([Chapter 3, §3.5](chapters/chap-03.md#35-stop)). It marks the system as shutting down, so no new user message enters a mailbox; stops the eviction loop, passivation manager and scheduler; runs the coordinated shutdown hooks ([§3.6](chapters/chap-03.md#36-coordinated-shutdown-hooks)); stops the datacenter components; builds the peer-state snapshot for relocation; stops the user guardian with every user actor, then the singleton manager, relocator, dead letter and death watch; sends each grain a `PoisonPill` so `OnDeactivate` runs on its own turn; stops the remaining system actors; closes the event stream; persists the snapshot to the oldest peers and leaves the cluster; and stops remoting. In a deferred step it unregisters metrics, resets the system, signals the dispatcher to stop without waiting for it, and flushes the logger. The steps after the background loops receive a context bounded by `shutdownTimeout` (default five minutes). The bound is a deadline handed to each step, not a limit enforced around it: a `PostStop` that ignores its context blocks `Stop` without limit. The errors of all steps are combined.
+`ActorSystem.Stop` is `shutdown` ([Chapter 3, §3.5](chapters/chap-03.md#35-stop)). It marks the system as shutting down, so no new user message enters a mailbox; stops the eviction loop, passivation manager and scheduler; runs the coordinated shutdown hooks ([§3.6](chapters/chap-03.md#36-coordinated-shutdown-hooks)); stops the datacenter components; builds the peer-state snapshot for relocation; stops the user guardian with every user actor, then the singleton manager, relocator, dead letter and death watch; sends each grain a `PoisonPill` so `OnDeactivate` runs on its own turn; stops the remaining system actors; closes the event stream; persists the snapshot to the oldest peers, withdraws its registry records and leaves the cluster ([§3.5](chapters/chap-03.md#leaving-the-cluster)); and stops remoting. In a deferred step it unregisters metrics, resets the system, signals the dispatchers to stop without waiting for them, and flushes the logger. The steps after the background loops receive a context bounded by `shutdownTimeout` (default five minutes). The bound is a deadline handed to each step, not a limit enforced around it: a `PostStop` that ignores its context blocks `Stop` without limit. The errors of all steps are combined.
 
 ## Cluster consistency model
 
@@ -415,17 +418,17 @@ Each datacenter is an independent cluster; nothing in the registry is shared bet
 
 | Term | Definition |
 |---|---|
-| **Actor** | A value implementing `PreStart`, `Receive` and `PostStop` (`actor/actor.go`). It handles one message at a time and has no goroutine of its own. |
-| **ActorSystem** | The runtime that hosts actors. Created with `NewActorSystem`; one implementation, `actorSystem`. |
-| **Address** | `goakt://<system>@<host>:<port>/<qualified name>` plus an incarnation ID that tells two lives of one name apart. The qualified name is the registry key. |
+| **Actor** | A value implementing `PreStart`, `Receive` and `PostStop` (`actor/actor.go`; [Chapter 1](chapters/chap-01.md)). It handles one message at a time and has no goroutine of its own. |
+| **ActorSystem** | The runtime that hosts actors. Created with `NewActorSystem`; one implementation, `actorSystem` ([Chapter 3](chapters/chap-03.md)). |
+| **Address** | `goakt://<system>@<host>:<port>/<qualified name>` plus an incarnation ID that tells two lives of one name apart. The qualified name is the registry key ([Chapter 4, §4.5](chapters/chap-04.md#45-names-addresses-and-identity)). |
 | **Cluster singleton** | An actor with one instance in the cluster, placed on the coordinator or, with a role, on the oldest member that advertises it. When its node departs, the leader re-establishes it through the same spawn path ([Chapter 21, §21.4](chapters/chap-21.md#214-cluster-singletons)-[§21.5](chapters/chap-21.md#215-singleton-races-crashes-and-leadership)). |
 | **Control plane** | The store of leased, versioned datacenter records used by multi-datacenter deployments; NATS JetStream and etcd implementations ship ([Chapter 22](chapters/chap-22.md)). |
 | **Coordinator (leader)** | The oldest member of the cluster. It relocates a departed node's actors, hosts role-less singletons, runs the datacenter controller and flushes CRDT changes to other datacenters ([Chapter 20, §20.8](chapters/chap-20.md#208-peers-members-and-the-leader)). |
-| **CRDT** | A conflict-free replicated data type: independent updates on each node merge to one state. Types in `crdt`; held and replicated by the Replicator. |
+| **CRDT** | A conflict-free replicated data type: independent updates on each node merge to one state. Types in `crdt`; held and replicated by the Replicator ([Chapter 24](chapters/chap-24.md)). |
 | **Dead letter** | A record that a message was not delivered or not handled, sent to `GoAktDeadletter` and published on the event stream. A `Tell` to a stopped actor returns `ErrDead` and makes none ([Chapter 5, §5.4](chapters/chap-05.md#54-dead-letters)). |
 | **Death watch** | `Watch` and `UnWatch` on a PID: a watcher receives `Terminated` after the watched actor's `PostStop` and after its name is freed. The `GoAktDeathWatch` system actor removes a dead actor's registry record in a cluster; the actor leaves the tree by itself ([Chapter 9, §9.8](chapters/chap-09.md#98-death-watch)). |
 | **Dependency** | A per-actor value given at spawn with `WithDependencies`. It is serialisable so it travels with the actor when it is relocated ([Chapter 12, §12.2](chapters/chap-12.md#122-dependencies)). |
-| **Directive** | What a supervisor decides for a failure: `StopDirective`, `ResumeDirective`, `RestartDirective` or `EscalateDirective`. Escalation makes the parent send itself a `PanicSignal` with the child as sender; the child stays suspended ([Chapter 9, §9.5](chapters/chap-09.md#95-escalation-and-the-guardians)). |
+| **Directive** | What a supervisor decides for a failure: `StopDirective`, `ResumeDirective`, `RestartDirective` or `EscalateDirective`. Escalation sends the parent a `PanicSignal` with the child as sender; the child stays suspended ([Chapter 9, §9.5](chapters/chap-09.md#95-escalation-and-the-guardians)). |
 | **Discovery provider** | The component that tells a node where its peers are at boot (`discovery.Provider`; [Chapter 19](chapters/chap-19.md)). |
 | **Dispatcher** | The fixed pool of worker goroutines and the ready queue that run actors and grains ([Chapter 7](chapters/chap-07.md)). |
 | **Event stream** | The in-process publish/subscribe bus for system events: actor lifecycle, cluster membership, dead letters, relocation. A subscriber's `Iterator` drains what is buffered at the time of the call ([Chapter 11, §11.3](chapters/chap-11.md#113-the-event-stream)). |
@@ -434,13 +437,13 @@ Each datacenter is an independent cluster; nothing in the registry is shared bet
 | **Guardian** | One of the three built-in actors at the top of the tree: `GoAktRootGuardian`, `GoAktSystemGuardian`, `GoAktUserGuardian` ([Chapter 3, §3.4](chapters/chap-03.md#34-the-guardian-tree)). |
 | **Handoff window** | The three seconds after a node departs during which `SendSync` retries a name that still resolves to the departed node ([Chapter 21, §21.12](chapters/chap-21.md#2112-the-handoff-window)). |
 | **Lane** | One duplex TCP connection to a peer, for control, ordinary or large traffic ([Chapter 15, §15.3](chapters/chap-15.md#153-architecture)). |
-| **Mailbox** | The per-actor queue of user messages. The default is the embedded mailbox; nine kinds exist ([Chapter 6](chapters/chap-06.md)). |
+| **Mailbox** | The per-actor queue of user messages. The default is the embedded mailbox; nine other kinds exist ([Chapter 6, §6.3](chapters/chap-06.md#63-choosing-a-mailbox)). |
 | **Passivation** | Stopping an idle actor according to its strategy: time-based (the default, two minutes), message-count or long-lived ([Chapter 10](chapters/chap-10.md)). |
 | **PID** | The handle to an actor, local or remote. Every send, watch and stop goes through one ([Chapter 4](chapters/chap-04.md)). |
 | **Reentrancy** | Letting an actor handle other messages while it waits for the reply to its own request. Modes: `Off` (requests refused, the default), `AllowAll`, `StashNonReentrant` ([Chapter 8, §8.5](chapters/chap-08.md#85-reentrancy-requests-that-do-not-block)). |
 | **Registry** | The `actors` and `grains` namespaces of the Olric map `goakt.dmap`, from actor qualified names and grain identities to the node that holds them. The same map, with the same partitions and quorums, also holds job keys, schedule-fire claims, actor and grain locks and round-robin counters ([Chapter 20, §20.4](chapters/chap-20.md#204-the-registry)). |
 | **Relocation** | Recreating a departed node's actors and grains on surviving nodes, driven by the leader's relocator ([Chapter 21](chapters/chap-21.md)). |
-| **Replicator** | The system actor `GoAktReplicator` that owns a node's CRDT store (`actor/replicator.go`). `ActorSystem.Replicator()` returns `nil` when CRDTs are off or the node lacks the configured role. |
+| **Replicator** | The system actor `GoAktReplicator` that owns a node's CRDT store (`actor/replicator.go`). `ActorSystem.Replicator()` returns `nil` when CRDTs are off or the node lacks the configured role ([Chapter 24, §24.3](chapters/chap-24.md#243-the-replicator)). |
 | **RunnableGraph** | A complete stream pipeline, ready for `Run` on an actor system, which returns a `StreamHandle` ([Chapter 25](chapters/chap-25.md)). |
 | **Serializer** | Converts a message to self-describing bytes and back for remoting (`remote.Serializer`; [Chapter 17, §17.2](chapters/chap-17.md#172-serializers)). |
 | **Stash** | A side buffer where an actor parks messages to handle later ([Chapter 8, §8.4](chapters/chap-08.md#84-the-stash)). |

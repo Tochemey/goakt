@@ -34,7 +34,7 @@
 
 - What a grain process holds, which flags describe where it stands in its lifecycle, and how it runs one turn at a time on the shared dispatcher.
 - How the two grain mailboxes work, why a grain has no system queue, and who recycles a dequeued context.
-- What a handler can do through `GrainContext`, how a reply finds its way back in each of the four context modes, and how `TellGrain` and `AskGrain` wait for it.
+- What a handler can do through `GrainContext`, how a reply finds its way back in each of the four context modes, and how [`TellGrain` and `AskGrain`](chap-13.md#134-finding-a-grain) wait for it.
 - What happens inside the process on activation, on deactivation, on a `PoisonPill` and on an idle deadline.
 - What becomes of a message that reaches an instance which has just deactivated.
 - How grain timers are scoped to one activation, and how a panic in a handler is answered.
@@ -44,7 +44,7 @@
 
 ## 14.1 The grain process
 
-An activated grain is a `grainPID` (`actor/grain_pid.go`). It is to a grain what a `PID` is to an actor, with less in it: no parent, no children, no supervisor, no behaviour stack and no system queue. `newGrainPID` builds it from the identity, the grain instance, the actor system and the activation configuration, takes the system's dispatcher and passivation manager, assigns it a home shard in the context pool ([§14.5](#145-the-context-pool)), and gives it a user mailbox ([§14.2](#142-mailboxes)).
+An activated grain is a `grainPID` (`actor/grain_pid.go`). It is to a grain what a `PID` is to an actor, with less in it: no parent, no children, no supervisor ([Chapter 9](chap-09.md)), no behaviour stack and no system queue. `newGrainPID` builds it from the identity, the grain instance, the actor system and the activation configuration, takes its dispatcher (the one named by `WithGrainDispatcher`, else the system's default; [Chapter 7, §7.1](chap-07.md#71-the-pieces)) and the system's passivation manager ([Chapter 10](chap-10.md)), assigns it a home shard in the context pool ([§14.5](#145-the-context-pool)), and gives it a user mailbox ([§14.2](#142-mailboxes)).
 
 The struct is laid out on three cache lines, and a test pins its size at 192 bytes (`grainPID` in `actor/grain_pid.go`). The comments group the fields by who touches them:
 
@@ -52,9 +52,9 @@ The struct is laid out on three cache lines, and a test pins its size at 192 byt
 |---|---|---|
 | 0 | mailbox head, latest activity, processed count, last passivation touch, the grain, the response queue, the passivation manager | the turn writes or reads them on every message; no producer touches this line per message |
 | 1 | bounded mailbox, identity, dispatcher, reentrancy state, `activated`, `ctxShard`, `onPoisonPill`, activation time, `mu` | producers and the turn read them on every message; they are written only off the message path: construction, activation, poisoning, timer scheduling |
-| 2 | mailbox tail, `schedState`, `phase`, actor system, config, `timers` | producers swap the tail and both sides compare-and-swap the scheduling word; the rest changes at activation, deactivation or a wire snapshot |
+| 2 | mailbox tail, `schedState`, `phase`, actor system, config, `timers`, the state behind `embedded` | producers swap the tail and both sides compare-and-swap the scheduling word; the rest changes at activation, deactivation or a wire snapshot |
 
-The padding at the end exists so that every process starts on a cache-line boundary; the comment records that at 176 bytes only one process in four was aligned.
+The padding at the end exists so that every process starts on a cache-line boundary; the comment records that at 184 bytes only one process in four was aligned.
 
 ### Where a process stands
 
@@ -93,7 +93,7 @@ The last transition exists because a failed `OnDeactivate` leaves the process in
 
 ## 14.2 Mailboxes
 
-A grain has one user mailbox, and a second queue for replies once it has a reentrancy state. The standalone mailbox and the reply queue are multi-producer, single-consumer linked lists that use the `GrainContext` itself as the list node, through its `next` field, so a context can sit in only one of them at a time (`grainMailbox` in `actor/grain_mailbox.go`). The default user mailbox is a segmented queue that stores messages in slots instead.
+A grain has one user mailbox ([Chapter 6](chap-06.md)), and a second queue for replies once it has a reentrancy state. The standalone mailbox and the reply queue are multi-producer, single-consumer linked lists that use the `GrainContext` itself as the list node, through its `next` field, so a context can sit in only one of them at a time (`grainMailbox` in `actor/grain_mailbox.go`). The default user mailbox is a segmented queue that stores messages in slots instead.
 
 `attachMailbox` picks the user mailbox at construction (`grainPID.attachMailbox` in `actor/grain_pid.go`):
 
@@ -114,7 +114,7 @@ The state behind `embedded` holds the turn context, the context held from the pr
 
 **The standalone mailbox** pads its head and tail apart and keeps a length (`grainMailbox` in `actor/grain_mailbox.go`):
 
-- **Bounded.** A producer reserves a slot by a compare-and-swap on the length before it links its node, so concurrent producers can never overshoot the capacity, and the capacity is exact rather than rounded to a power of two (`grainMailbox.tryEnqueue` in `actor/grain_mailbox.go`). A full mailbox returns `ErrMailboxFull`.
+- **Bounded.** A producer reserves a slot by a compare-and-swap on the length before it links its node, so concurrent producers can never overshoot the capacity (`grainMailbox.tryEnqueue` in `actor/grain_mailbox.go`). A full mailbox returns `ErrMailboxFull`.
 - **Unbounded.** The length is incremented after the link.
 - **`EnqueueSystem`** links whatever the capacity, counting the node first. It exists for the shutdown `PoisonPill`: a grain whose bounded mailbox is full still receives it, and user enqueues keep failing until the mailbox drains below capacity (`grainMailbox.EnqueueSystem` in `actor/grain_mailbox.go`).
 - **`IsEmpty`** is a length of zero.
@@ -129,7 +129,7 @@ The state behind `embedded` holds the turn context, the context held from the pr
 
 A grain is the dispatcher's second kind of `schedulable` ([Chapter 7, §7.1](chap-07.md#71-the-pieces)). It shares the actors' worker pool and the dispatch state of [Chapter 7, §7.2](chap-07.md#72-the-dispatch-state).
 
-**Producing.** `receive` checks that the grain is active, enqueues the context, and then tries `Idle → Scheduled`; only the winner pushes the grain onto the ready queue with `dispatcher.schedule` (`grainPID.receive` in `actor/grain_pid.go`; `dispatcher.schedule` in `actor/dispatcher.go`). An enqueue failure is reported twice: on the context with `Err`, which wakes a caller blocked on an ack or a reply, and as the return value, which is all a one-way send has. An inactive grain is only refused with `ErrDead` in the return value. A one-way send to a grain on the embedded mailbox goes through `receiveOneWay` instead, which stores the message as values and cannot fail past the activity check (`grainPID.receiveOneWay` in `actor/grain_pid.go`). Every other producer (envelopes, timer ticks, the two pills) follows the same enqueue-then-`TrySchedule` pair.
+**Producing.** `receive` checks that the grain is active, enqueues the context, and then tries `Idle → Scheduled`; only the winner pushes the grain onto the ready queue (`grainPID.receive` in `actor/grain_pid.go`). `receive` pushes with `dispatcher.scheduleHandoff`, for a caller that blocks until the grain has run: a parked worker is handed the grain directly ([Chapter 7, §7.5](chap-07.md#75-the-ready-queue); `dispatcher.scheduleHandoff` and `dispatcher.schedule` in `actor/dispatcher.go`). An enqueue failure is reported twice: on the context with `Err`, which wakes a caller blocked on an ack or a reply, and as the return value, which is all a one-way send has. An inactive grain is only refused with `ErrDead` in the return value. A one-way send to a grain on the embedded mailbox goes through `receiveOneWay` instead, which stores the message as values and cannot fail past the activity check (`grainPID.receiveOneWay` in `actor/grain_pid.go`). Every other producer follows the same enqueue-then-`TrySchedule` pair. Envelopes (`enqueueEnvelope`) and the shutdown `PoisonPill` (`enqueuePoisonPill`) push with `scheduleHandoff`; `receiveOneWay`, timer ticks (`deliverTimerTick`) and the passivation pill (`enqueuePassivationPill`) push with plain `schedule`, onto the global ready queue.
 
 **The turn.** A worker that takes the grain calls `runTurn` (`grainPID.runTurn` in `actor/grain_pid.go`):
 
@@ -137,6 +137,25 @@ A grain is the dispatcher's second kind of `schedulable` ([Chapter 7, §7.1](cha
 2. Read the clock once. Every message of the turn that counts as activity records that instant.
 3. For at most the dispatcher's throughput budget (32 by default, `dispatcherThroughput` in `actor/dispatcher.go`): take a reply from the response queue if there is one; otherwise, unless the grain is paused, take a user message; with nothing to take, call `finishOrReclaim`, which either ends the turn or reclaims the grain and goes round again; otherwise dispatch the message.
 4. When the budget is spent, move back to `Scheduled` and push the grain onto the worker's own local ring with `worker.reschedule`, or onto the global ring when the local one is full (`actor/worker.go`; `readyQueue.pushLocal` in `actor/ready_queue.go`).
+
+```mermaid
+flowchart TD
+    A["runTurn: TakeForProcessing"] -->|lost| Z["return"]
+    A -->|won| B["read the clock once"]
+    B --> C{"budget left?"}
+    C -->|no| D["YieldToScheduled, worker.reschedule"]
+    C -->|yes| E{"reply queued?"}
+    E -->|yes| H["dispatchOne"]
+    E -->|no| F{"paused?"}
+    F -->|no| G["dequeue a user message"]
+    F -->|yes| I["nothing to take"]
+    G -->|message| H
+    G -->|none| I
+    I --> J["finishOrReclaim"]
+    J -->|work found, grain reclaimed| C
+    J -->|idle| Z
+    H --> C
+```
 
 `finishOrReclaim` resets the state to `Idle` first and only then checks for pending work, the reset-then-check of [Chapter 7, §7.2](chap-07.md#72-the-dispatch-state) (`grainPID.finishOrReclaim` in `actor/grain_pid.go`). Pending work is a non-empty response queue, or a non-empty user mailbox while the grain is not paused (`grainPID.hasPendingWork` in `actor/grain_pid.go`).
 
@@ -167,6 +186,7 @@ What counts as activity, for passivation, and what counts as processed:
 | expired ask | no | no |
 | `AsyncResponse` | no | yes |
 | timer tick | yes | only with `WithTimerKeepAlive` |
+| late message, redirected ([§14.10](#1410-late-messages)) | no | no |
 | `PoisonPill`, passivation pill | no | no |
 
 Issuing a request also records activity (`grainPID.admitRequest` in `actor/grain_pid.go`).
@@ -200,9 +220,9 @@ The sentinel is spelled `ErrUnhanledMessage`, and `Unhandled` wraps it with `New
 
 On the ask path, successes and failures share the one reply channel. A failure is wrapped in `grainReplyError` so that a response payload which happens to implement `error` stays a payload (`grainReplyError` in `actor/grain_context.go`). `sendReply` delivers at most once, guarded by a compare-and-swap on `responseClosed`, and its send cannot block (`GrainContext.sendReply` in `actor/grain_context.go`). The routed replies of a request envelope are once-only too, through the turn-owned `replySent` flag (`GrainContext.sendAsyncReply` in `actor/grain_context.go`).
 
-**The ack channel has no such guard.** On an acknowledged tell or a timer tick, `NoErr`, `Err` and `Unhandled` each do a plain, blocking send on the one-slot channel, so only the first reply to a message is sure to find room. A panic after a reply makes `recovery` send a second one through `Err`.
+**The ack channel has no such guard.** On an acknowledged tell or a timer tick, `NoErr`, `Err` and `Unhandled` each make a non-blocking send on the one-slot channel (`GrainContext.sendAck` in `actor/grain_context.go`). Nothing stops a second reply: it is dropped when the slot is still full, and otherwise sits in the channel unread (the pool drains a channel before reusing it). A panic after a reply makes `recovery` send a second one through `Err`.
 
-A one-way failure has nowhere else to go, so `toDeadletter` sends a `SendDeadletter` to the system's dead-letter actor. The receiver is the grain's address on this node, named by its identity, and the sender is `NoSender` (`GrainContext.toDeadletter` in `actor/grain_context.go`).
+A one-way failure has nowhere else to go, so `toDeadletter` sends a `SendDeadletter` to the system's dead-letter actor ([Chapter 5, §5.4](chap-05.md#54-dead-letters)). The receiver is the grain's address on this node, named by its identity, and the sender is `NoSender` (`GrainContext.toDeadletter` in `actor/grain_context.go`).
 
 ### What a handler can do
 
@@ -210,13 +230,13 @@ A one-way failure has nowhere else to go, so `toDeadletter` sends a `SendDeadlet
 |---|---|---|
 | Read the message | `Message`, `Self`, `ActorSystem`, `CorrelationID`, `Context` | `CorrelationID` is empty unless the message arrived as a request envelope |
 | Reply | `Response`, `NoErr`, `Err`, `Unhandled`, `DeferResponse` | see the table above |
-| Send to grains | `AskGrain`, `TellGrain`, `PipeToGrain`, `PipeToSelf` | `AskGrain` and `TellGrain` call the system's methods ([§14.6](#146-sending-and-waiting)) |
+| Send to grains | `AskGrain`, `TellGrain`, `PipeToGrain`, `PipeToSelf` | `AskGrain` and `TellGrain` call the system's methods ([§14.6](#146-sending-and-waiting)); the pipes are [Chapter 5, §5.7](chap-05.md#57-pipeto)'s |
 | Send to actors, by name | `AskActor`, `TellActor`, `PipeToActor` | sent from `NoSender`: `SendSync`, `SendAsync` and `PipeToName` |
 | Requests without blocking | `RequestGrain`, `RequestActor`, `EnableReentrancy`, `DisableReentrancy` | [Chapter 8, §8.6](chap-08.md#86-reentrancy-in-grains) |
 | Timers | `ScheduleOnce`, `Schedule`, `ScheduleWithCron`, `CancelSchedule` | [§14.11](#1411-timers) |
-| Dependencies and extensions | `Dependencies`, `Dependency`, `Extensions`, `Extension` | dependencies come from the grain's configuration, extensions from the system |
+| Dependencies and extensions | `Dependencies`, `Dependency`, `Extensions`, `Extension` | dependencies come from the grain's configuration ([Chapter 12, §12.2](chap-12.md#122-dependencies)), extensions from the system ([Chapter 12, §12.1](chap-12.md#121-extensions)) |
 
-All of them take their context from `context.WithoutCancel` of the context the message arrived with (`GrainContext.AskGrain` in `actor/grain_context.go`). A call a handler makes through its context is therefore never cancelled by the sender, and is not bounded by the deadline of the ask being handled. `PipeToGrain` runs its task on a new goroutine and delivers the result, or a `StatusFailure`, with an acknowledged `TellGrain` (`handleGrainCompletion` in `actor/grain_context.go`). `GrainIdentity` is deprecated in favour of the package-level `GrainOf` ([Chapter 13](chap-13.md)).
+The methods that send a message or run a task take their context from `context.WithoutCancel` of the context the message arrived with (`GrainContext.AskGrain` in `actor/grain_context.go`). A call a handler makes through its context is therefore never cancelled by the sender, and is not bounded by the deadline of the ask being handled. `PipeToGrain` runs its task on a new goroutine and delivers the result, or a `StatusFailure`, with an acknowledged `TellGrain` (`handleGrainCompletion` in `actor/grain_context.go`). `GrainIdentity` is deprecated in favour of the package-level `GrainOf` ([Chapter 13](chap-13.md)).
 
 **Reentrancy** lets a grain issue requests without blocking its turn, with a second queue for the replies and a pause instead of a stash; [Chapter 8, §8.6](chap-08.md#86-reentrancy-in-grains) covers it in full.
 
@@ -243,7 +263,7 @@ The three sizing constants belong to the actors' pool and size the grain rings t
 
 **No clones.** No grain path enqueues one context into a second queue, so the grain pool has no `cloneContext`. The mailbox link of a `GrainContext` is an `atomic.Pointer` rather than an `unsafe.Pointer` (`GrainContext` in `actor/grain_context.go`).
 
-**Measuring.** `BenchmarkGrainAskParallel` (`benchmark/bench_grain_ask_parallel_test.go`) runs `GOMAXPROCS` askers each on a grain of its own, the grain counterpart of the parallel ping-pongs: it shows whether independent grains add up. `BenchmarkGrainAsk` (`benchmark/bench_grain_ask_test.go`) asks one grain and cannot show a process-wide pool lock.
+**Benchmarks.** `BenchmarkGrainAskParallel` (`benchmark/bench_grain_ask_parallel_test.go`) runs `GOMAXPROCS` askers, each on a grain of its own. `BenchmarkGrainAsk` (`benchmark/bench_grain_ask_test.go`) asks a single grain.
 
 **Channel pools.** The ack and reply channels of one slot come from two more pools of the same shape, `grainErrorChannelPool` for tells and `grainReplyChannelPool` for asks, indexed by the context's `poolShard` (`actor/grain_context_pool.go`). Both are instances of one generic ring, `channelPoolShards`, for `error` and for `any` channels (`channelPoolShards` in `actor/grain_context_pool.go`). They exist because the caller waits for the grain: `TellGrain` until the message is handled, `AskGrain` until the reply is in hand. The comment on the ack pool records that borrowing from the process-wide channel pool cost two global lock crossings per message; the one on the reply pool, that it spares an ask the 128 bytes and two allocations of a fresh channel. The actor `Ask` path uses a third instance of the same ring, `askReplyChannelPool`, and returns a channel only when its reply is in hand and its timeout was stopped before it fired, which is what rules out a late write reaching the next borrower (`askReplyChannelPool` and `putResponseChannel` in `actor/pools.go`). `put` drains a channel before pooling it. A caller returns its channel only once the answer is in hand. On a timeout or a cancellation it abandons the channel to the garbage collector instead, because a late answer could still land in it (`putGrainReplyChannel` in `actor/grain_context_pool.go`).
 
@@ -278,7 +298,7 @@ sequenceDiagram
 
 Some consequences of these paths:
 
-- **A full bounded mailbox** answers an acknowledged tell or an ask with `ErrMailboxFull` at once, through `Err` on the context, and a one-way tell through the return value. The refused message of an acknowledged tell or an ask does not become a dead letter, unlike on an actor's bounded mailbox ([Chapter 6, §6.3](chap-06.md#63-choosing-a-mailbox)). A one-way tell does: `receive` reports the failure through `Err` as well, and `Err` on a one-way context records a dead letter, so the sender gets the error and a dead letter is recorded too (`grainPID.receive` in `actor/grain_pid.go`; `GrainContext.Err` in `actor/grain_context.go`).
+- **A full bounded mailbox** answers an acknowledged tell or an ask with `ErrMailboxFull` at once, through `Err` on the context, and a one-way tell through the return value. The refused message of an acknowledged tell or an ask does not become a dead letter ([Chapter 5, §5.4](chap-05.md#54-dead-letters)), unlike on an actor's bounded mailbox ([Chapter 6, §6.3](chap-06.md#63-choosing-a-mailbox)). A one-way tell does: `receive` reports the failure through `Err` as well, and `Err` on a one-way context records a dead letter, so the sender gets the error and a dead letter is recorded too (`grainPID.receive` in `actor/grain_pid.go`; `GrainContext.Err` in `actor/grain_context.go`).
 - **`Response` does not acknowledge a tell.** On a `grainTell` context it has no channel to write to, so the caller waits for its timeout.
 - **A handler that never replies** leaves an acknowledged tell or an ask waiting until its timeout.
 - **A grain calling another grain through its context blocks its own turn.** `GrainContext.AskGrain` and the default `GrainContext.TellGrain` wait on the calling grain's turn, holding its worker. A grain that sends an acknowledged tell or an ask to itself always times out, because its own turn holds the dispatch state.
@@ -286,7 +306,7 @@ Some consequences of these paths:
 
 ## 14.7 Panics and failures in a handler
 
-A grain has no supervisor. `recovery` is deferred around `OnReceive`, around a timer tick, around a reply continuation and around `handlePoisonPill` (`grainPID.recovery` in `actor/grain_pid.go`). It turns the panic value into a `*PanicError`: a value that already is one keeps its identity, another error is wrapped with the caller's function, file and line, and any other value is formatted with `%#v`. Then:
+A grain has no supervisor ([Chapter 9](chap-09.md)). `recovery` is deferred around `OnReceive`, around a timer tick, around a reply continuation and around `handlePoisonPill` (`grainPID.recovery` in `actor/grain_pid.go`). It turns the panic value into a `*PanicError`: a value that already is one keeps its identity, another error is wrapped with the caller's function, file and line, and any other value is formatted with `%#v`. Then:
 
 | Context | What happens to the panic |
 |---|---|
@@ -296,7 +316,7 @@ A grain has no supervisor. `recovery` is deferred around `OnReceive`, around a t
 | one-way | logged at error level, and recorded as a dead letter |
 | response envelope | logged at error level only |
 
-The routes in the table assume the handler had not replied yet. On an ask or a request envelope, a panic after the handler already replied is dropped: `sendReply` and `sendAsyncReply` are once-only ([§14.4](#144-graincontext)), and `recovery` logs only when there is no reply route, so nothing is logged and the caller keeps the first reply. On an acknowledged tell the panic is a second send on the ack channel ([§14.4](#144-graincontext)).
+The routes in the table assume the handler had not replied yet. On an ask or a request envelope, a panic after the handler already replied is dropped: `sendReply` and `sendAsyncReply` are once-only ([§14.4](#144-graincontext)), and `recovery` logs only when there is no reply route, so nothing is logged and the caller keeps the first reply. On an acknowledged tell the panic is a second, unguarded send on the ack channel ([§14.4](#144-graincontext)).
 
 A request envelope carries its failure as text: `routeAsyncReply` copies `failure.Error()` into the `AsyncResponse`, and the requester rebuilds it with `asyncErrorFromString`, which restores a few known sentinels and turns any other text into a plain error (`actorSystem.routeAsyncReply` in `actor/async_reply.go`; `asyncErrorFromString` in `actor/pid.go`). A panic answered on that path therefore reaches the caller as an error with the panic's text, not a `*PanicError`. On the ask channel path a caller on the same node receives the `*PanicError` value itself.
 
@@ -308,7 +328,7 @@ Panics in the lifecycle hooks are contained too. A panic in `OnActivate` becomes
 
 ### `activate`
 
-`activate` runs on the goroutine of the send that triggered the activation, not inside a turn of the grain ([Chapter 13](chap-13.md)). In order (`grainPID.activate` in `actor/grain_pid.go`):
+`activate` runs on the goroutine of the call that triggered the activation, not inside a turn of the grain ([Chapter 13, §13.5](chap-13.md#135-activating-on-this-node)). In order (`grainPID.activate` in `actor/grain_pid.go`):
 
 1. Set the phase to `grainActivating`, so that timers scheduled from `OnActivate` stay dormant.
 2. Defer a cleanup that stops the timers if activation fails, so a timer planted by a failed `OnActivate` never fires.
@@ -328,6 +348,20 @@ In order (`grainPID.deactivate` in `actor/grain_pid.go`):
 5. Delete the process from the node's grains map.
 6. In a cluster, release the registry record, but only while it still names this node: a record re-owned by another node belongs to a live activation there. A failed release fails the deactivation, unless the node is stopping, in which case it is logged as a warning and the record is left to the next activation, which releases it ([Chapter 13](chap-13.md)).
 
+```mermaid
+flowchart TD
+    A["unregister from the passivation manager"] --> B["stop and drop the timers, phase inactive"]
+    B --> C["OnDeactivate"]
+    C -->|error or panic| X["ErrGrainDeactivationFailure<br/>the process stays in the grains map"]
+    C -->|ok| D["delete from the grains map"]
+    D --> E{"in a cluster?"}
+    E -->|no| OK["done"]
+    E -->|yes| F["release the registry record"]
+    F -->|released| OK
+    F -->|failed, node stopping| W["log a warning, done"]
+    F -->|failed| X2["ErrGrainDeactivationFailure"]
+```
+
 The context `OnDeactivate` receives is the shutdown context for a `PoisonPill` sent at shutdown, the sender's for one sent with `TellGrain` (detached from its cancellation for a one-way tell), the one bounded by the ask's deadline for one sent with `AskGrain` ([§14.4](#144-graincontext)), and a background context for an idle deactivation.
 
 ### `PoisonPill`
@@ -346,7 +380,7 @@ A `PoisonPill` reaches the grain in two ways:
 1. Takes the processes in the grains map. An inactive one is removed from the map and skipped.
 2. For each active one, queues a cancellation for every request in flight, so a paused grain wakes up and can reach the pill ([Chapter 8, §8.6](chap-08.md#86-reentrancy-in-grains)), then enqueues the pill and keeps its ack channel.
 3. Waits for the acks one after the other, bounded by the stop's context, which carries the shutdown timeout and has already been used by the earlier steps of the stop. Each ack returns its channel to the grain's shard and removes the grain from the map; a failed `OnDeactivate` is logged and named in the returned error.
-4. When the context ends first, returns its error, joined with the failures collected so far. The grains still waiting keep their pill in the mailbox and lose it when the dispatcher stops, so their `OnDeactivate` never runs.
+4. When the context ends first, returns its error, joined with the failures collected so far. The grains still waiting keep their pill in the mailbox and lose it when the dispatcher stops ([Chapter 7, §7.7](chap-07.md#77-stopping-the-pool)), so their `OnDeactivate` never runs.
 
 Because the pill waits behind the messages queued before it, a grain with a backlog delays the shutdown by the time it takes to drain it.
 
@@ -383,6 +417,23 @@ A message can sit in the mailbox of an instance that has deactivated: queued beh
 3. **Queue the copy** in the system's `lateGrainMessages`, a map of queues keyed by the deactivated instance, which lives on the actor system so the process keeps its fixed size. The first push for an instance starts a goroutine running `forwardLateMessages`; later pushes join its queue (`lateGrainMessages.push` in `actor/grain_late_message.go`).
 4. The goroutine **forwards one message at a time**, oldest first, and deletes the queue once it is empty, so the messages keep their arrival order (`grainPID.forwardLateMessages` in `actor/grain_late_message.go`).
 
+```mermaid
+flowchart TD
+    A["handleGrainContext dequeues a message<br/>the instance is inactive"] --> B{"node stopping?"}
+    B -->|yes| R["Err: ErrSystemShuttingDown, marked"]
+    B -->|no| C["copy the context"]
+    C --> D["lateGrainMessages.push"]
+    D -->|first for this instance| G["start forwardLateMessages"]
+    D -->|queue exists| Q["the running goroutine picks it up"]
+    G --> F["forwardLate, oldest first"]
+    Q --> F
+    F --> H{"ask expired?"}
+    H -->|yes| T["Err: ErrRequestTimeout"]
+    H -->|no| I{"request envelope?"}
+    I -->|yes| J["deliverAsyncEnvelope"]
+    I -->|no| K["localSendGrain in the original mode"]
+```
+
 Forwarding one copy (`GrainContext.forwardLate` in `actor/grain_late_message.go`):
 
 1. An ask whose sender has stopped waiting gets `ErrRequestTimeout` and no activation.
@@ -395,7 +446,7 @@ A sender that looked the process up before it left the grains map, and reaches `
 
 ## 14.11 Timers
 
-A grain schedules messages to itself with `ScheduleOnce`, `Schedule`, `ScheduleWithCron` and `CancelSchedule`, on `GrainContext` from a handler or on `GrainProps` from `OnActivate` (`GrainContext.ScheduleOnce` in `actor/grain_context.go`; `GrainProps.ScheduleOnce` in `actor/grain_props.go`). These timers are **volatile and scoped to one activation**: never persisted, cancelled when the grain deactivates, and they never reactivate a passivated grain. `ActorSystem.ScheduleGrain` is a different mechanism, which sends with `TellGrain` and does reactivate ([Chapter 11, §11.1](chap-11.md#111-the-scheduler)).
+A grain schedules messages to itself with `ScheduleOnce`, `Schedule`, `ScheduleWithCron` and `CancelSchedule`, on `GrainContext` from a handler or on `GrainProps` from `OnActivate` (`GrainContext.ScheduleOnce` in `actor/grain_context.go`; `GrainProps.ScheduleOnce` in `actor/grain_props.go`). These timers are **volatile and scoped to one activation**: never persisted, cancelled when the grain deactivates, and they never reactivate a passivated grain. `ActorSystem.ScheduleGrain` and its siblings are a different mechanism: they send with `TellGrain` and do reactivate a passivated grain ([Chapter 11, §11.1](chap-11.md#111-the-scheduler); [Chapter 10](chap-10.md)).
 
 ### The registry
 
@@ -443,9 +494,9 @@ Some consequences:
 
 How a node finds the owner of a grain is [Chapter 13](chap-13.md)'s; the remote client and server in general are Chapters [16](chap-16.md) and [17](chap-17.md). This section covers only how a grain message crosses and enters the process.
 
-**Sending.** `sendToGrainOwner` uses `sendRemoteAskGrainRequest` for an ask, which carries the caller's timeout, and `sendRemoteTellGrainRequest` otherwise (`actor/grain_engine.go`). A one-way tell uses `RemoteTellGrainOneWay`, so the owner answers once the message is enqueued; an acknowledged tell and an envelope use `RemoteTellGrain`. A node sends a message it forwards, or one it received from a peer, at most once; only the `AskGrain` and `TellGrain` entry points may send again after a refusal (`actorSystem.sendToGrainOwner` in `actor/grain_engine.go`).
+**Sending.** `sendToGrainOwner` goes through the remote client ([Chapter 16, §16.7](chap-16.md#167-sending-a-tell), [§16.9](chap-16.md#169-sending-an-ask-and-a-control-request)) and uses `sendRemoteAskGrainRequest` for an ask, which carries the caller's timeout, and `sendRemoteTellGrainRequest` otherwise (`actor/grain_engine.go`). A one-way tell uses `RemoteTellGrainOneWay`, so the owner answers once the message is enqueued; an acknowledged tell and an envelope use `RemoteTellGrain`. A node sends a message it forwards, or one it received from a peer, at most once; only the `AskGrain` and `TellGrain` entry points may send again after a refusal (`actorSystem.sendToGrainOwner` in `actor/grain_engine.go`).
 
-**Receiving.** Two handlers serve the requests (`actor/remote_server.go`). Both refuse with `FAILED_PRECONDITION` when remoting is disabled, check that the request is addressed to this node, extract the propagated context, deserialise the message with the remoting serializer, rebuild the identity, and refuse a reserved name. Then:
+**Receiving.** Two handlers serve the requests ([Chapter 17, §17.7](chap-17.md#177-grain-entry-points); `actor/remote_server.go`). Both refuse with `FAILED_PRECONDITION` when remoting is disabled, check that the request is addressed to this node, extract the propagated context, deserialise the message with the remoting serializer, rebuild the identity, and refuse a reserved name. Then:
 
 | Handler | Delivery | Timeout |
 |---|---|---|
@@ -530,7 +581,8 @@ A node refusal, such as a stopping node refusing to activate the grain or to run
 | An acknowledged tell always waits up to 5 seconds; only the caller's context can shorten it | `actorSystem.localTellGrain` in `actor/grain_engine.go` |
 | `GrainContext.AskGrain` and the default `GrainContext.TellGrain` block the calling grain's turn and its worker; an acknowledged tell to oneself always times out | `GrainContext.TellGrain` in `actor/grain_context.go` |
 | Calls made through a `GrainContext` are detached from the sender's cancellation and from the ask deadline | `GrainContext.AskGrain` in `actor/grain_context.go` |
-| A full bounded mailbox returns `ErrMailboxFull` to the sender; a one-way tell is recorded as a dead letter as well, an acknowledged tell or an ask is not | `grainPID.receive` in `actor/grain_pid.go` |
+| A full bounded mailbox returns `ErrMailboxFull` to the sender; a one-way tell is recorded as a [dead letter](chap-05.md#54-dead-letters) as well, an acknowledged tell or an ask is not | `grainPID.receive` in `actor/grain_pid.go` |
+| The ack channel of an acknowledged tell or a timer tick has no once-only guard; a second reply is sent without blocking and dropped if the slot is full | `GrainContext.sendAck` in `actor/grain_context.go` |
 | A `PoisonPill` waits behind the messages queued before it; one sent by an application can be refused by a full mailbox, the shutdown one cannot | `grainPID.enqueueSystemMessage` in `actor/grain_pid.go` |
 | A panic leaves the grain active with whatever state the handler left; nothing restarts it | `grainPID.recovery` in `actor/grain_pid.go` |
 | A failure on a one-way message becomes a dead letter; a panic in a reply continuation is only logged | `grainPID.recovery` in `actor/grain_pid.go` |
