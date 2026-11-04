@@ -3,7 +3,7 @@
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
-- [18.1 `tls.Info` and where it is set](#181-tlsinfo-and-where-it-is-set)
+- [18.1 tls.Info and where it is set](#181-tlsinfo-and-where-it-is-set)
 - [18.2 Where TLS is applied](#182-where-tls-is-applied)
   - [Remoting](#remoting)
   - [The cluster engine](#the-cluster-engine)
@@ -27,7 +27,7 @@
 - What each client operation sends, to which node, and what it returns when the actor does not exist.
 - How the three balancers pick a node, where least load gets its figures, and how refresh and `Close` behave.
 
-## 18.1 `tls.Info` and where it is set
+## 18.1 tls.Info and where it is set
 
 `Info` in `tls/info.go` is a plain struct with two `crypto/tls` configurations and no behaviour:
 
@@ -88,7 +88,7 @@ The TLS handshake runs on the first read. In `auto` and `duplex` modes that read
 
 ### Membership gossip
 
-When an `Info` is set, `cluster.setupMemberlistConfig` replaces memberlist's own transport with `Transport` from `internal/memberlist/transport.go`, built by `NewTransport` with `TLSEnabled` and **`ClientConfig`** (`TransportConfig` in `internal/memberlist/transport_config.go`). The transport:
+When an `Info` is set, `cluster.setupMemberlistConfig` replaces memberlist's own transport with `Transport` from `internal/memberlist/transport.go`, built by `NewTransport` with `TLSEnabled` and **ClientConfig** (`TransportConfig` in `internal/memberlist/transport_config.go`). The transport:
 
 - carries both of memberlist's "packets" and "streams" over TCP; there is no UDP socket;
 - opens a new connection for every packet and every stream, with no reuse (`Transport.writeTo`, `Transport.getConnection`);
@@ -195,9 +195,9 @@ In cluster mode the lookup reads the cluster registry ([Chapter 20, §20.4](chap
 Details that the table does not show:
 
 - **Lookup errors** (transport or server) are returned as they are by every lookup-based operation.
-- **`Kinds`** returns the kinds registered on the picked node's cluster configuration (`actorSystem.getKindsHandler`), not a union over the cluster. It holds `Client.locker` for the whole request, so other calls wait for it to pick a node. A server error is returned as a formatted "proto error: code=..., msg=..." string, not as a sentinel.
+- **Kinds** returns the kinds registered on the picked node's cluster configuration (`actorSystem.getKindsHandler`), not a union over the cluster. It holds `Client.locker` for the whole request, so other calls wait for it to pick a node. A server error is returned as a formatted "proto error: code=..., msg=..." string, not as a sentinel.
 - **`Spawn` and `SpawnBalanced`** reject a request carrying `ReliableDelivery` with `ErrReliableSpawnUnsupported` before anything is sent: their doc comments give the reason, the spawning side of a reliable flow must take part in the delivery protocol ([Chapter 23](chap-23.md)). The request is then validated and sanitised by the remoting client, and the picked node spawns the actor locally with `Spawn`, or as a cluster singleton when `Singleton` is set (`actorSystem.remoteSpawnHandler` in `actor/remote_server.go`; [Chapter 21](chap-21.md)). The address of the new actor is discarded.
-- **`Tell`** and `TellGrain` take a `proto.Message`; `Ask` and `AskGrain` take `any`, and a value that is not a `proto.Message` needs a serializer registered on the node's `remote.Config`. A `Tell` that returns `nil` was admitted, not delivered ([Chapter 15, §15.10](chap-15.md#1510-semantics-defaults-and-invariants)), and a later failure is dropped ([§18.5](#185-the-standalone-client-shape-and-construction)).
+- **Tell** and `TellGrain` take a `proto.Message`; `Ask` and `AskGrain` take `any`, and a value that is not a `proto.Message` needs a serializer registered on the node's `remote.Config`. A `Tell` that returns `nil` was admitted, not delivered ([Chapter 15, §15.10](chap-15.md#1510-semantics-defaults-and-invariants)), and a later failure is dropped ([§18.5](#185-the-standalone-client-shape-and-construction)).
 - **Grain calls** go to the picked node, which routes them to the grain's owner ([Chapter 13, §13.4](chap-13.md#134-finding-a-grain), [Chapter 14](chap-14.md); the server entry points are in [Chapter 17, §17.7](chap-17.md#177-grain-entry-points)). Their errors pass through `Unmark` in `internal/refusal/refusal.go`: a node that refused the message because it is shutting down flags its error reply as refused, the remoting client marks the decoded error (`checkProtoError` in `internal/remoteclient/client.go`), and the client removes the mark before the error reaches the application. The error keeps its text and still matches the same sentinels.
 
 **`TellGrain` options.** `TellGrainOption` in `client/tell_grain_option.go` is a function from a `tellGrainConfig` value to a new one; `newTellGrainConfig` folds the options over a zero value. The only option, `WithOneWay`, sets `isOneWay`. Without it the call returns once the hosting node has processed the message and returns the handler's error; with it the call returns once the message is enqueued, and a handler failure is recorded by the hosting node as a dead letter instead (doc comment of `WithOneWay`).

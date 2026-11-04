@@ -137,7 +137,7 @@ A `Merge` given another type returns the receiver unchanged. Elements of an `ORS
 
 A remove travels as an absence: the removed dot is covered by the clock and not listed, so the peer drops it. A dot added and removed again before the delta is taken is not live and is not sent. Because the delta is a full state for the nodes it names, it can be merged in any order and more than once. The price is size: for a set written mostly by one node, each delta approaches the full state, as an `ORMap` delta already does. A delta that carried only the changed dots would need a dot-based causal context in the wire format, which the version-vector clock cannot express.
 
-**`ORSet.Compact`** keeps, per element, the highest dot of each node and discards the others. `ORMap.Compact` compacts the key set and drops values whose key is gone.
+**ORSet.Compact** keeps, per element, the highest dot of each node and discards the others. `ORMap.Compact` compacts the key set and drops values whose key is gone.
 
 ### Keys
 

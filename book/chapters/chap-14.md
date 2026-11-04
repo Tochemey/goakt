@@ -7,7 +7,7 @@
   - [Where a process stands](#where-a-process-stands)
 - [14.2 Mailboxes](#142-mailboxes)
 - [14.3 Scheduling and the turn](#143-scheduling-and-the-turn)
-- [14.4 `GrainContext`](#144-graincontext)
+- [14.4 GrainContext](#144-graincontext)
   - [Modes](#modes)
   - [Where a reply goes](#where-a-reply-goes)
   - [What a handler can do](#what-a-handler-can-do)
@@ -16,9 +16,9 @@
 - [14.6 Sending and waiting](#146-sending-and-waiting)
 - [14.7 Panics and failures in a handler](#147-panics-and-failures-in-a-handler)
 - [14.8 Activation and deactivation inside the process](#148-activation-and-deactivation-inside-the-process)
-  - [`activate`](#activate)
-  - [`deactivate`](#deactivate)
-  - [`PoisonPill`](#poisonpill)
+  - [activate](#activate)
+  - [deactivate](#deactivate)
+  - [PoisonPill](#poisonpill)
   - [Shutdown](#shutdown)
 - [14.9 Idle passivation](#149-idle-passivation)
 - [14.10 Late messages](#1410-late-messages)
@@ -93,7 +93,7 @@ The last transition exists because a failed `OnDeactivate` leaves the process in
 
 ## 14.2 Mailboxes
 
-A grain has one user mailbox ([Chapter 6](chap-06.md)), and a second queue for replies once it has a reentrancy state. The standalone mailbox and the reply queue are multi-producer, single-consumer linked lists that use the `GrainContext` itself as the list node, through its `next` field, so a context can sit in only one of them at a time (`grainMailbox` in `actor/grain_mailbox.go`). The default user mailbox is a segmented queue that stores messages in slots instead.
+A grain has a user mailbox ([Chapter 6](chap-06.md)). Once it has a reentrancy state, it also has a reply queue. The standalone mailbox and reply queue are multi-producer, single-consumer linked lists. They use `GrainContext.next` as the list node, so a context can sit in only one of them at a time (`grainMailbox` in `actor/grain_mailbox.go`). The default user mailbox is a segmented queue that stores messages in slots instead.
 
 `attachMailbox` picks the user mailbox at construction (`grainPID.attachMailbox` in `actor/grain_pid.go`):
 
@@ -104,24 +104,38 @@ A grain has one user mailbox ([Chapter 6](chap-06.md)), and a second queue for r
 
 `enqueueMessage`, `dequeueMessage` and `mailboxEmpty` route to whichever the process has; the nil check on `boundedMailbox` is the switch (`actor/grain_pid.go`). The response queue is an unbounded `grainMailbox`, attached once and never removed ([Chapter 8, §8.6](chap-08.md#86-reentrancy-in-grains)).
 
-**The embedded mailbox** is the same design as the actor's embedded mailbox ([Chapter 6, §6.2](chap-06.md#62-the-default-mailbox)), written out again for the grain slot rather than shared, so that a grain-side change never touches the actor's hot path: `(*embeddedGrainMailbox)(pid)` is a pointer conversion that allocates nothing, messages live in segments of `mailboxSegmentSlots` slots that producers claim with a fetch-and-add on the segment's cursor, a segment the turn has read to its end is rewound in place under the next generation, a longer backlog links further segments, and the consumer keeps up to `mailboxSpareSegments` finished segments for the next links. The cursor, generation and link-marker helpers are the actor mailbox's (`cursorGeneration`, `cursorClaims`, `nextGenerationCursor` and `linkedInGeneration` in `actor/embedded_mailbox.go`). The head sits on the line the turn writes and the tail on the line producers read; producers write the tail only when they link a segment. There is no length counter: `IsEmpty` reads slot states from the read index on, and `Len` counts claimed slots, for tests and diagnostics only (`actor/embedded_grain_mailbox.go`).
+**The embedded mailbox** repeats the actor embedded design in the grain slot instead of sharing code, so grain changes never touch the actor hot path ([Chapter 6, §6.2](chap-06.md#62-the-default-mailbox)).
 
-One deliberate difference from the actor mailbox: the actor rewinds a segment whenever its turn has read every slot claimed in it, which for an actor answering one message at a time is a compare-and-swap on the cursor at every empty dequeue, and the next producer then fetches that cache line back from the turn's core. The grain mailbox rewinds only when the turn has read every slot of the segment, so a grain answering one message at a time writes the cursor once per `mailboxSegmentSlots` messages (`embeddedGrainMailbox.rewind` in `actor/embedded_grain_mailbox.go`).
+`(*embeddedGrainMailbox)(pid)` is a pointer conversion that allocates nothing. Messages live in segments of `mailboxSegmentSlots` slots; producers claim slots with a fetch-and-add on the segment cursor.
 
-A slot holds either a context that came in through `Enqueue`, or a message stored as values: its payload, the identity it was sent to and its send context. The value form is the one-way tell's: `receiveOneWay` writes the three values into a slot and schedules the grain, and no pooled context is involved (`grainPID.receiveOneWay` in `actor/grain_pid.go`; `embeddedGrainMailbox.put` in `actor/embedded_grain_mailbox.go`). The turn dispatches such a message in the grain's own turn context, which lives in the mailbox state and is seeded once with the process, its actor system and the one-way flag; `reuseOneWay` replaces the message, the identity and the context for each one, and rebuilds the context as a one-way message only when a handler turned it into something else, for instance by handling an `AsyncRequest` payload (`GrainContext.reuseOneWay` in `actor/grain_context.go`). Every other message, an acknowledged tell, an ask, an envelope, a timer tick or a runtime pill, travels in its own context through `Enqueue`, in the same queue, so the two kinds keep their relative order.
+The turn rewinds a segment it has read to its end under the next generation. A longer backlog links further segments. The consumer keeps up to `mailboxSpareSegments` finished segments for the next links.
 
-The state behind `embedded` holds the turn context, the context held from the previous dequeue, the spare segments and the read index. The turn allocates it on its first dequeue of a message, so a grain that never receives one pays only the pointer, and a grain with a bounded mailbox never has one (`embeddedGrainMailbox.newState` in `actor/embedded_grain_mailbox.go`).
+The cursor, generation and link-marker helpers are the actor mailbox's (`cursorGeneration`, `cursorClaims`, `nextGenerationCursor` and `linkedInGeneration` in `actor/embedded_mailbox.go`). The head sits on the line the turn writes and the tail on the line producers read. Producers write the tail only when they link a segment.
+
+There is no length counter. `IsEmpty` reads slot states from the read index on, and `Len` counts claimed slots for tests and diagnostics only (`actor/embedded_grain_mailbox.go`).
+
+One deliberate difference from the actor mailbox is when a segment is rewound. The actor rewinds a segment after its turn reads every claimed slot. For an actor answering one message at a time, that is a compare-and-swap on the cursor at every empty dequeue; the next producer then fetches that cache line from the turn's core.
+
+The grain mailbox waits until the turn has read every slot in the segment. A grain answering one message at a time therefore writes the cursor once per `mailboxSegmentSlots` messages (`embeddedGrainMailbox.rewind` in `actor/embedded_grain_mailbox.go`).
+
+A slot holds either a context from `Enqueue`, or a message stored as values: payload, target identity and send context. The value form is the one-way tell: `receiveOneWay` writes the three values into a slot and schedules the grain with no pooled context (`grainPID.receiveOneWay` in `actor/grain_pid.go`; `embeddedGrainMailbox.put` in `actor/embedded_grain_mailbox.go`). The turn dispatches that form in the grain's turn context in the mailbox state, seeded once with the process, its actor system and the one-way flag. `reuseOneWay` replaces the message, identity and context for each one, and rebuilds as one-way only when a handler changed the mode, for instance by handling an `AsyncRequest` payload (`GrainContext.reuseOneWay` in `actor/grain_context.go`).
+
+Every other message (acknowledged tell, ask, envelope, timer tick or runtime pill) travels in its own context through `Enqueue`, in the same queue, so the two kinds keep their relative order. The state behind `embedded` holds the turn context, the context held from the previous dequeue, spare segments and the read index. The turn allocates it on its first dequeue, so a grain that never receives a message pays only the pointer, and a grain with a bounded mailbox never has one (`embeddedGrainMailbox.newState` in `actor/embedded_grain_mailbox.go`).
 
 **The standalone mailbox** pads its head and tail apart and keeps a length (`grainMailbox` in `actor/grain_mailbox.go`):
 
 - **Bounded.** A producer reserves a slot by a compare-and-swap on the length before it links its node, so concurrent producers can never overshoot the capacity (`grainMailbox.tryEnqueue` in `actor/grain_mailbox.go`). A full mailbox returns `ErrMailboxFull`.
 - **Unbounded.** The length is incremented after the link.
-- **`EnqueueSystem`** links whatever the capacity, counting the node first. It exists for the shutdown `PoisonPill`: a grain whose bounded mailbox is full still receives it, and user enqueues keep failing until the mailbox drains below capacity (`grainMailbox.EnqueueSystem` in `actor/grain_mailbox.go`).
-- **`IsEmpty`** is a length of zero.
+- **EnqueueSystem** links whatever the capacity, counting the node first. It exists for the shutdown `PoisonPill`: a grain whose bounded mailbox is full still receives it, and user enqueues keep failing until the mailbox drains below capacity (`grainMailbox.EnqueueSystem` in `actor/grain_mailbox.go`).
+- **IsEmpty** is a length of zero.
 
 **One difference in the standalone mailbox.** Between a producer's swap and its link, the new node is the tail but is not yet reachable from the head. The embedded mailboxes, the actor's and the grain's, report empty during that window: a claimed slot that is not yet published holds no message. The standalone mailbox instead checks whether the head is also the tail: if not, a link is on its way, and `Dequeue` spins with `runtime.Gosched` until it lands (`grainMailbox.Dequeue` in `actor/grain_mailbox.go`). Reporting empty in that window is safe for the same reason as on an actor: the producer schedules the grain only after its enqueue returns ([Chapter 7, §7.2](chap-07.md#72-the-dispatch-state)).
 
-**Who releases a context.** As on actors, a dequeued context stays in use while the handler runs. On the standalone mailbox it is the new sentinel, and the **next** `Dequeue` resets the previous sentinel and returns it to its home shard of the pool. On the embedded mailbox a context that came in through `Enqueue` is held, and the **next** `Dequeue` releases it with `releaseGrainContext`; a message stored as values comes out in the turn context, which is never pooled. `dispatchOne` must therefore never release the context itself (`grainPID.dispatchOne` in `actor/grain_pid.go`). The paths that build a context and then fail to enqueue it release it themselves with `releaseGrainContext` (`actor/grain_context_pool.go`): a one-way tell or an envelope that the grain refuses, for example because its bounded mailbox is full, and a timer tick or a passivation pill that cannot be enqueued (`actorSystem.localOneWayTellGrain` in `actor/grain_engine.go`; `grainPID.enqueueEnvelope`, `grainPID.deliverTimerTick` and `grainPID.enqueuePassivationPill` in `actor/grain_pid.go`). That is the failure path; the steady-state release is the dequeue.
+**Who releases a context.** As on actors, a dequeued context stays in use while the handler runs. On the standalone mailbox it is the new sentinel. The **next** `Dequeue` resets the previous sentinel and returns it to its home shard of the pool.
+
+On the embedded mailbox, a context from `Enqueue` is held until the **next** `Dequeue` releases it with `releaseGrainContext`. A message stored as values comes out in the turn context, which is never pooled. `dispatchOne` must therefore never release the context itself (`grainPID.dispatchOne` in `actor/grain_pid.go`).
+
+The paths that build a context and then fail to enqueue it release it themselves with `releaseGrainContext` (`actor/grain_context_pool.go`). Those paths include a rejected one-way tell or envelope, for example when a bounded mailbox is full, and a timer tick or passivation pill that cannot be enqueued (`actorSystem.localOneWayTellGrain` in `actor/grain_engine.go`; `grainPID.enqueueEnvelope`, `grainPID.deliverTimerTick` and `grainPID.enqueuePassivationPill` in `actor/grain_pid.go`). That is the failure path; the steady-state release is the dequeue.
 
 **No system queue.** Every runtime message, the `PoisonPill`, the passivation pill and timer ticks, travels through the user mailbox in arrival order. A `PoisonPill` is therefore handled after the messages queued before it, not ahead of them as on an actor ([Chapter 7, §7.4](chap-07.md#74-the-system-queue)).
 
@@ -191,7 +205,7 @@ What counts as activity, for passivation, and what counts as processed:
 
 Issuing a request also records activity (`grainPID.admitRequest` in `actor/grain_pid.go`).
 
-## 14.4 `GrainContext`
+## 14.4 GrainContext
 
 `OnReceive` gets a `*GrainContext` (`actor/grain_context.go`). It is pooled and rebuilt for each message by `build`, which resets every per-message field and attaches reply channels according to a mode.
 
@@ -326,7 +340,7 @@ Panics in the lifecycle hooks are contained too. A panic in `OnActivate` becomes
 
 ## 14.8 Activation and deactivation inside the process
 
-### `activate`
+### activate
 
 `activate` runs on the goroutine of the call that triggered the activation, not inside a turn of the grain ([Chapter 13, §13.5](chap-13.md#135-activating-on-this-node)). In order (`grainPID.activate` in `actor/grain_pid.go`):
 
@@ -337,7 +351,7 @@ Panics in the lifecycle hooks are contained too. A panic in `OnActivate` becomes
 
 The retrier's first and maximum backoff are both `initTimeout`, randomised by half either way, and the whole sequence shares the one `initTimeout` context. A second attempt starts at least half the budget after the first fails, and a third would start after the budget has run out, so in practice `OnActivate` runs at most twice whatever `WithGrainInitMaxRetries` says (`WithGrainInitTimeout` in `actor/grain_option.go`; `internal/retry/retry.go`). Actors use a 1 ms first backoff for `PreStart` instead ([Chapter 4, §4.4](chap-04.md#44-prestart-retries-and-the-timeout-that-is-not-one)).
 
-### `deactivate`
+### deactivate
 
 In order (`grainPID.deactivate` in `actor/grain_pid.go`):
 
@@ -364,7 +378,7 @@ flowchart TD
 
 The context `OnDeactivate` receives is the shutdown context for a `PoisonPill` sent at shutdown, the sender's for one sent with `TellGrain` (detached from its cancellation for a one-way tell), the one bounded by the ask's deadline for one sent with `AskGrain` ([§14.4](#144-graincontext)), and a background context for an idle deactivation.
 
-### `PoisonPill`
+### PoisonPill
 
 `handlePoisonPill` sets `onPoisonPill`, acknowledges at once with `NoErr` if the grain is no longer active, so `OnDeactivate` runs once even when a passivation pill got there first (the flag then stays set, [§14.1](#141-the-grain-process)), completes every request still in flight with `ErrRequestCanceled` ([Chapter 8, §8.6](chap-08.md#86-reentrancy-in-grains)), and calls `deactivate`. The outcome goes to the context with `Err` or `NoErr` (`grainPID.handlePoisonPill` in `actor/grain_pid.go`).
 

@@ -6,14 +6,14 @@
 - [26.1 The circuit breaker's states](#261-the-circuit-breakers-states)
 - [26.2 Options, defaults and validation](#262-options-defaults-and-validation)
 - [26.3 The rolling window](#263-the-rolling-window)
-- [26.4 `Execute`, step by step](#264-execute-step-by-step)
+- [26.4 Execute, step by step](#264-execute-step-by-step)
 - [26.5 Recording an outcome and changing state](#265-recording-an-outcome-and-changing-state)
 - [26.6 Errors and metrics](#266-errors-and-metrics)
 - [26.7 Concurrency](#267-concurrency)
 - [26.8 Where GoAkt uses the breaker](#268-where-goakt-uses-the-breaker)
 - [26.9 Reading memory on each platform](#269-reading-memory-on-each-platform)
 - [26.10 Where the memory figures are used](#2610-where-the-memory-figures-are-used)
-- [26.11 `TestKit`](#2611-testkit)
+- [26.11 TestKit](#2611-testkit)
 - [26.12 Probes](#2612-probes)
 - [26.13 Grain probes](#2613-grain-probes)
 - [26.14 Multi-node clusters](#2614-multi-node-clusters)
@@ -92,7 +92,7 @@ Counts therefore expire a whole bucket at a time. A sample is dropped when the c
 
 **Adding.** `bucketWindow.add` in `breaker/bucket.go` advances, increments the current bucket and returns the totals of all buckets, all under one lock acquisition, so the caller evaluates the state from a consistent snapshot. `bucketWindow.snapshot` advances and sums in the same way, reading the clock under the lock, and reports the window as `[now - window, now]`. `bucketWindow.reset` clears every bucket and realigns the window at the current time.
 
-## 26.4 `Execute`, step by step
+## 26.4 Execute, step by step
 
 `CircuitBreaker.Execute` in `breaker/breaker.go` takes a context, the function to protect, and an optional fallback. In order:
 
@@ -226,7 +226,7 @@ There is one call site: `actorSystem.Metric` in `actor/actor_system.go` ([Chapte
 
 The figures are informational only. **Nothing in the actor system decides anything from memory.** In particular, least-load placement of actors and of grains ([Chapter 21, §21.1](chap-21.md#211-placement-with-spawnon); [Chapter 13, §13.4](chap-13.md#134-finding-a-grain)) does not: `actorSystem.selectPlacementPeer` in `actor/spawn.go` and `actorSystem.selectActivationPeer` in `actor/grain_engine.go` both call `actorSystem.leastLoadedPeer` in `actor/grain_engine.go`, which asks every candidate peer for its node metric and picks the lowest load; the peer answers in `actorSystem.getNodeMetricHandler` in `actor/remote_server.go` with its number of actors plus its number of grains. Placement is [Chapter 21](chap-21.md), Placement, Singletons and Relocation; the peers are cluster members ([Chapter 19](chap-19.md)).
 
-## 26.11 `TestKit`
+## 26.11 TestKit
 
 `New` in `testkit/testkit.go` builds a `TestKit` around a fresh, started, standalone actor system ([Chapter 3, §3.2](chap-03.md#32-construction-newactorsystem)) named `testkit`: no remoting ([Chapter 15](chap-15.md)), no cluster, an actor init timeout of one second with five retries ([Chapter 4, §4.4](chap-04.md#44-prestart-retries-and-the-timeout-that-is-not-one)), the extensions ([Chapter 12, §12.1](chap-12.md#121-extensions)) given with `WithExtensions`, and a discard logger unless `WithLogging(level)` installs a Zap logger on standard error (`testkit/option.go`). A failure to create or start the system calls `t.Fatal`.
 
@@ -293,11 +293,11 @@ There is no `Stop`: nothing needs releasing. `NodeGrainOf` in `testkit/grain_of.
 
 `MultiNodes` (`testkit/multi_nodes.go`) runs a whole cluster ([Chapter 19](chap-19.md), [Chapter 20](chap-20.md)) inside the test process.
 
-**`NewMultiNodes`** records the testing value, a logger, the actor kinds to register on every node and the extensions. It starts nothing.
+**NewMultiNodes** records the testing value, a logger, the actor kinds to register on every node and the extensions. It starts nothing.
 
-**`MultiNodes.Start`** in `testkit/multi_nodes.go` starts an embedded NATS server on `127.0.0.1` with a random port, waits up to two seconds for it to accept connections, and fails the test otherwise. A second call is a no-op. Each `MultiNodes` has its own server, so two in one process form two separate clusters.
+**MultiNodes.Start** in `testkit/multi_nodes.go` starts an embedded NATS server on `127.0.0.1` with a random port, waits up to two seconds for it to accept connections, and fails the test otherwise. A second call is a no-op. Each `MultiNodes` has its own server, so two in one process form two separate clusters.
 
-**`MultiNodes.StartNode`** builds and starts one node; it fails the test if `Start` has not been called. In order:
+**MultiNodes.StartNode** builds and starts one node; it fails the test if `Start` has not been called. In order:
 
 1. Take three free ports from `Get` in `internal/net/dynaport.go` (ports free on both TCP and UDP, never handed out twice in the process; it panics rather than failing the test if it cannot find them): discovery, peers and remoting.
 2. Create a NATS discovery provider ([Chapter 19](chap-19.md), Membership and Discovery) on the shared server, subject `testSubject`, with the discovery port.
@@ -306,7 +306,7 @@ There is no `Stop`: nothing needs releasing. `NodeGrainOf` in `testkit/grain_of.
 
 The name is only the key in the `MultiNodes` map and the value `TestNode.NodeName` returns; every node's actor system is called `testSystem`. Starting a second node under a name already in use replaces the first in the map, and the replaced node is then never stopped by `Stop`.
 
-**`TestNode`** (`testkit/testnode.go`) offers `Spawn`, `SpawnSingleton` ([Chapter 21, §21.4](chap-21.md#214-cluster-singletons)), `Kill`, `Subscribe`, `SpawnProbe`, `SpawnGrainProbe` and the deprecated `GrainIdentity`, with the same behaviour as the `TestKit` helpers, on that node's system, plus `NodeName` and `ActorSystem`. The helpers that act on the system, except `GrainIdentity`, require the node to be running. Its methods have value receivers but share the `created` flag by pointer, so a node stopped through `MultiNodes.StopNode` refuses further use.
+**TestNode** (`testkit/testnode.go`) offers `Spawn`, `SpawnSingleton` ([Chapter 21, §21.4](chap-21.md#214-cluster-singletons)), `Kill`, `Subscribe`, `SpawnProbe`, `SpawnGrainProbe` and the deprecated `GrainIdentity`, with the same behaviour as the `TestKit` helpers, on that node's system, plus `NodeName` and `ActorSystem`. The helpers that act on the system, except `GrainIdentity`, require the node to be running. Its methods have value receivers but share the `created` flag by pointer, so a node stopped through `MultiNodes.StopNode` refuses further use.
 
 **Stopping.** `MultiNodes.StopNode` stops the node's actor system, then closes its discovery provider, fails the test on error, marks the node stopped (its `created` flag) and removes the node from the map. `MultiNodes.Stop` stops the actor system and closes the discovery provider of every node in map order, without touching their `created` flags, then shuts the NATS server down and empties the map; it is a no-op when not started, so it can be registered with `t.Cleanup(multi.Stop)` right after `Start`. If one node fails to stop, `Stop` marks the `MultiNodes` stopped and calls `Fatalf` at once, leaving the remaining nodes and the NATS server running; a later `Stop` is then a no-op. `MultiNodes.GetNode` and `MultiNodes.StopNode` fail the test for an unknown name or before `Start`, and `MultiNodes.NodeCount` returns the number of nodes in the map.
 

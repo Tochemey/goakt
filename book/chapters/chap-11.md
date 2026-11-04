@@ -233,7 +233,11 @@ sequenceDiagram
 
 A peer's topic actor delivers a `TopicMessage` to its local subscribers the same way, waits for those sends, and records it in its seen-set keyed by the sending topic actor, so a message redelivered by the same peer is dropped (`topicActor.handleTopicMessage`). It does not forward the message again.
 
-**`TopicStats`** (`ActorSystem.TopicStats`, which fails with `ErrTopicActorNotStarted` when there is no topic actor) asks the local topic actor for the number of its live subscribers, and an instance count: 1 when the node has at least one live subscriber, 0 otherwise. In a cluster it asks every peer's topic actor for its subscriber count and adds 1 for each peer with a non-zero count, so the instance count is the number of nodes with subscribers. That fan-out runs on a goroutine that replies to the asker when done, so the topic actor's turn ends at once and it can answer the peers' own requests meanwhile (`topicActor.handleGetTopicStats` and `topicActor.queryRemotePeerInstanceCount`). An error from any peer means no reply, so the caller sees its own timeout.
+**TopicStats** (`ActorSystem.TopicStats`, which fails with `ErrTopicActorNotStarted` when there is no topic actor) asks the local topic actor for its number of live subscribers. Its instance count is 1 when the node has at least one live subscriber, and 0 otherwise.
+
+In a cluster it asks every peer's topic actor for its subscriber count and adds 1 for each peer with a non-zero count. The instance count is therefore the number of nodes with subscribers.
+
+That fan-out runs on a goroutine that replies to the asker when done, so the topic actor's turn ends at once and it can answer the peers' own requests meanwhile (`topicActor.handleGetTopicStats` and `topicActor.queryRemotePeerInstanceCount`). An error from any peer means no reply, so the caller sees its own timeout.
 
 ## Guarantees
 

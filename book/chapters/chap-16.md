@@ -269,7 +269,7 @@ One coalescer exists per destination and ordinary lane (`client.getCoalescer` in
 
 ## 16.9 Sending an ask and a control request
 
-**`RemoteAsk`** (`client.RemoteAsk` in `internal/remoteclient/client.go`; the local ask path is [Chapter 5, §5.3](chap-05.md#53-how-a-reply-gets-back)). In order:
+**RemoteAsk** (`client.RemoteAsk` in `internal/remoteclient/client.go`; the local ask path is [Chapter 5, §5.3](chap-05.md#53-how-a-reply-gets-back)). In order:
 
 1. Bound the context with the timeout: the earlier of the context's deadline and `now + timeout`; a timeout of zero or less adds nothing (`askContext`).
 2. Resolve the serializer and serialize (with the pool for a protobuf message).
@@ -281,7 +281,7 @@ One coalescer exists per destination and ordinary lane (`client.getCoalescer` in
 
 `client.sendAskLegacy` sends a `RemoteAskRequest` with one message and the timeout, and decodes the first message of the response; a response with no message is a `nil` reply.
 
-**`RemoteBatchAsk`** bounds the context the same way and serializes every message. On the duplex path, `client.sendBatchAskDuplex` runs one goroutine per ask, at most 64 at a time (`maxBatchAskConcurrency`), all sharing the context and one metadata blob, and stores each reply at its request's index, so replies come back in request order. The call waits for every ask to finish; then the first error to have arrived fails the whole batch and the other replies are discarded. The legacy fallback is taken only while no ask has been handed to a session; after that, sending the batch again could run asks twice, so the call fails instead. The legacy path sends one `RemoteAskRequest` with every message and returns the replies in the server's order.
+**RemoteBatchAsk** bounds the context the same way and serializes every message. On the duplex path, `client.sendBatchAskDuplex` runs one goroutine per ask, at most 64 at a time (`maxBatchAskConcurrency`), all sharing the context and one metadata blob, and stores each reply at its request's index, so replies come back in request order. The call waits for every ask to finish; then the first error to have arrived fails the whole batch and the other replies are discarded. The legacy fallback is taken only while no ask has been handed to a session; after that, sending the batch again could run asks twice, so the call fails instead. The legacy path sends one `RemoteAskRequest` with every message and returns the replies in the server's order.
 
 **Control requests** (`client.sendControl`). With the legacy pin, the request goes through the endpoint's legacy client (`client.sendControlLegacy`). Otherwise `client.sendControlDuplex`:
 

@@ -11,8 +11,8 @@
 - [5.4 Dead letters](#54-dead-letters)
   - [NoSender](#nosender)
 - [5.5 Forwarding](#55-forwarding)
-- [5.6 Sending from inside `Receive`: errors become supervision](#56-sending-from-inside-receive-errors-become-supervision)
-- [5.7 `PipeTo`](#57-pipeto)
+- [5.6 Sending from inside Receive: errors become supervision](#56-sending-from-inside-receive-errors-become-supervision)
+- [5.7 PipeTo](#57-pipeto)
 - [5.8 Sending by name](#58-sending-by-name)
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
@@ -35,7 +35,7 @@ Asynchronous requests with continuations (`ctx.Request`) belong with reentrancy,
 |---|---|---|---|
 | Package functions | `actor.Tell(ctx, pid, msg)`, `actor.Ask(...)` | the system's NoSender ([§5.4](#nosender)) | returned `error` |
 | PID methods | `pid.Tell(ctx, to, msg)`, `pid.Ask(...)`, `pid.SendAsync(ctx, name, msg)` | `pid` | returned `error` |
-| ReceiveContext methods, inside `Receive` ([Chapter 8, §8.2](chap-08.md#82-what-a-handler-can-do)) | `ctx.Tell(to, msg)`, `ctx.Ask(...)`, `ctx.Forward(to)` | the current actor, except `ctx.Forward`, which keeps the original sender ([§5.5](#55-forwarding)) | **`ctx.Err`**, which goes to supervision ([§5.6](#56-sending-from-inside-receive-errors-become-supervision)) |
+| ReceiveContext methods, inside `Receive` ([Chapter 8, §8.2](chap-08.md#82-what-a-handler-can-do)) | `ctx.Tell(to, msg)`, `ctx.Ask(...)`, `ctx.Forward(to)` | the current actor, except `ctx.Forward`, which keeps the original sender ([§5.5](#55-forwarding)) | **ctx.Err**, which goes to supervision ([§5.6](#56-sending-from-inside-receive-errors-become-supervision)) |
 
 The ReceiveContext methods wrap the PID methods. Each one first derives a context with `context.WithoutCancel` from the handler's context (`ReceiveContext.withoutCancel` in `actor/receive_context.go`), so a send started in a handler is not cut short when the turn ends. That drops the handler context's deadline as well as its cancellation. `ctx.Tell` and `ctx.BatchTell` call the internal forms `PID.tell` and `PID.batchTell` in `actor/pid.go`, which also name the worker running the turn. A recipient on the default mailbox that is idle is then scheduled on that worker's own queue ([Chapter 7, §7.5](chap-07.md#75-the-ready-queue); `PID.putValue` and `PID.scheduleFrom`). Any other delivery goes through `PID.doReceive`.
 
@@ -178,7 +178,7 @@ To observe dead letters, subscribe to the system event stream (`ActorSystem.Subs
 
 `ctx.ForwardTo(name)` (`ReceiveContext.ForwardTo`) does nothing outside cluster mode ([Chapter 19](chap-19.md)), and reports nothing. In cluster mode it calls `sender.SendAsync` ([§5.8](#58-sending-by-name)), so the receiver sees the original sender, no reply route is carried, and `sender` must be a local, running PID (a remote sender yields `ErrNotLocal` through `ctx.Err`).
 
-## 5.6 Sending from inside `Receive`: errors become supervision
+## 5.6 Sending from inside Receive: errors become supervision
 
 `ctx.Err(err)` only records the error. After the turn, `PID.recovery` submits any recorded error to supervision (`actor/pid.go`). From that moment until the decision the actor hands out no user message (`PID.handlesUserMessages`; [Chapter 9, §9.2](chap-09.md#92-from-a-failure-to-a-decision)). Every ReceiveContext send method reports its failure through `ctx.Err`, so **a failed send is a supervised failure of the sender**:
 
@@ -191,7 +191,7 @@ Practical rules for handler code:
 - Or give the actor a supervisor with a directive for the errors you expect ([Chapter 9](chap-09.md)); the `ReceiveContext.Ask` and `ReceiveContext.Err` comments name `WithAnyErrorDirective`.
 - `ctx.Ask` blocks the dispatcher worker running this turn for up to `timeout`. A blocked handler holds a worker for the whole wait, and the default pool has `GOMAXPROCS` workers ([Chapter 7, §7.1](chap-07.md#71-the-pieces)), so enough actors asking each other synchronously can stall every actor and grain on the pool. `PipeTo` or `ctx.Request` keep the worker free. Before it blocks, `PID.Ask` called from a turn hands the actor that turn readied to another worker (`worker.handoffRunnext` in `actor/worker.go`), so the asker does not wait on an actor stuck in its own run-next slot.
 
-## 5.7 `PipeTo`
+## 5.7 PipeTo
 
 `pid.PipeTo(ctx, to, task)` (`PID.PipeTo` in `actor/pid.go`) runs `task` on a new goroutine and delivers its result to `to` as an ordinary message, with the piping actor as sender (`PID.handleCompletion`). The calling actor's turn is not blocked. The task runs outside the actor, so it must not touch the actor's state. `PipeTo` returns `ErrNotLocal` when the piping PID is remote, `ErrUndefinedTask` for a nil task and `ErrDead` when `to` is not running at the call.
 

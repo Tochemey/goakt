@@ -1,4 +1,4 @@
-# GoAkt from the Inside
+# GoAkt Internal
 
 A book that explains how GoAkt is implemented: its data structures, algorithms, concurrency and invariants, at a level of detail the user documentation does not cover. It is for maintainers and contributors. The user documentation is in [`docs/`](../docs) and is published at <https://docs.goakt.dev>.
 
@@ -10,10 +10,11 @@ A book that explains how GoAkt is implemented: its data structures, algorithms, 
 
 ## How the book is written
 
+- **[Style guide](STYLE.md):** chapter shape, voice, and how `architecture.md` relates to the chapters.
 - **The code is the source.** Every chapter describes what the code does.
 - **Code is referred to by name, not by line.** A statement names the function, method, type or constant it rests on, and the file: `PID.tryPassivation` in `actor/pid.go`. Names survive edits that move lines.
 - **A guarantee names its test.** Something is called a guarantee only when a test in the repository enforces it, and the guarantee names that test function and its file. Anything else is listed under "Implementation details (may change)" or "Behaviours to know".
-- **Rationale comes from the maintainers.** The reasons for a design are taken from code comments and from the maintainers. They are not guessed.
+- **Rationale comes from code comments.** The reason for a design is recorded only when an explicit code comment states it. Otherwise the book describes the behaviour without guessing at a reason.
 
 Every chapter starts with a table of contents.
 

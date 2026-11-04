@@ -7,12 +7,12 @@
 - [13.2 Identity](#132-identity)
 - [13.3 Configuration](#133-configuration)
 - [13.4 Finding a grain](#134-finding-a-grain)
-  - [`GrainOf` and `GrainIdentity`](#grainof-and-grainidentity)
-  - [`TellGrain` and `AskGrain`](#tellgrain-and-askgrain)
+  - [GrainOf and GrainIdentity](#grainof-and-grainidentity)
+  - [TellGrain and AskGrain](#tellgrain-and-askgrain)
   - [On the receiving node](#on-the-receiving-node)
 - [13.5 Activating on this node](#135-activating-on-this-node)
   - [The per-identity activation group](#the-per-identity-activation-group)
-  - [`activate`](#activate)
+  - [activate](#activate)
   - [Reachable only once published](#reachable-only-once-published)
   - [Retried registry writes](#retried-registry-writes)
   - [A new grain in a cluster](#a-new-grain-in-a-cluster)
@@ -21,7 +21,7 @@
 - [13.7 When the recorded owner is gone](#137-when-the-recorded-owner-is-gone)
   - [Classifying the failure](#classifying-the-failure)
   - [An activation request](#an-activation-request)
-  - [A message from `AskGrain` or `TellGrain`](#a-message-from-askgrain-or-tellgrain)
+  - [A message from AskGrain or TellGrain](#a-message-from-askgrain-or-tellgrain)
 - [13.8 Deactivation](#138-deactivation)
 - [13.9 Actor versus grain](#139-actor-versus-grain)
 - [Guarantees](#guarantees)
@@ -66,7 +66,7 @@ The registry is the one actor kinds use too. `DeregisterGrainKind` removes a kin
 
 **The local table.** Every grain this node runs is in `grains`, an `xsync.Map` from the identity string to its `grainPID` (`actorSystem` in `actor/actor_system.go`). An entry in the map is not the same as an active grain: `grainPID.isActive` reads an `activated` flag, and an entry can sit in the map inactive, as a failed `OnDeactivate` leaves it ([§13.8](#138-deactivation)). `Grains` returns the keys of this map and, in a cluster, merges them with a scan of the registry, sorted and without duplicates; if the scan fails it returns the local keys alone (`actorSystem.Grains` in `actor/grain_engine.go`).
 
-**`GrainProps`** is what `OnActivate` and `OnDeactivate` receive: the identity, the actor system, the grain's dependencies, and a pointer to the process (`GrainProps` in `actor/grain_props.go`). A new one is built for each call (`grainPID.activate` and `grainPID.deactivate` in `actor/grain_pid.go`). Its `ScheduleOnce`, `Schedule`, `ScheduleWithCron` and `CancelSchedule` reach the grain's timer registry; their comments say a timer registered from `OnActivate` stays dormant until the activation completes, and that registration from `OnDeactivate` fails with `ErrGrainTimersStopped` (`actor/grain_props.go`). [Chapter 14, §14.11](chap-14.md#1411-timers) covers timers.
+**GrainProps** is what `OnActivate` and `OnDeactivate` receive: the identity, the actor system, the grain's dependencies, and a pointer to the process (`GrainProps` in `actor/grain_props.go`). A new one is built for each call (`grainPID.activate` and `grainPID.deactivate` in `actor/grain_pid.go`). Its `ScheduleOnce`, `Schedule`, `ScheduleWithCron` and `CancelSchedule` reach the grain's timer registry; their comments say a timer registered from `OnActivate` stays dormant until the activation completes, and that registration from `OnDeactivate` fails with `ErrGrainTimersStopped` (`actor/grain_props.go`). [Chapter 14, §14.11](chap-14.md#1411-timers) covers timers.
 
 ## 13.2 Identity
 
@@ -147,7 +147,7 @@ Four entry points reach a grain. All of them refuse with `ErrActorSystemNotStart
 
 `TellGrain` and `AskGrain` validate the identity first and wrap a failure in `ErrInvalidGrainIdentity`. An acknowledged `TellGrain` passes `DefaultGrainRequestTimeout`, five seconds (`actor/defaults.go`), as its timeout. That bounds only the wait for the acknowledgement from a process on this node: the timer starts in `localTellGrain`, after `ensureGrainProcess` returns, so the registry read, the activation barrier and the activation itself ([§13.5](#135-activating-on-this-node), [§13.6](#136-one-activation-per-identity)) come on top (`actorSystem.localSendGrain` and `actorSystem.localTellGrain` in `actor/grain_engine.go`). A tell forwarded to a remote owner has no bound of its own on the calling node: the remoting client ([Chapter 16](chap-16.md)) waits only on the caller's context (`client.remoteTellGrain` in `internal/remoteclient/client.go`), and the owner's `remoteTellGrainHandler` applies no deadline from the request and passes the same five seconds to its own `localSendGrain` (`actorSystem.remoteTellGrainHandler` in `actor/remote_server.go`). Both strip the internal refusal mark from the error they return ([§13.7](#137-when-the-recorded-owner-is-gone)). How a message is delivered once the grain is found, on the reply channel, the acknowledgement channel or an envelope, is [Chapter 14, §14.6](chap-14.md#146-sending-and-waiting)'s subject, and the envelope path for reentrant grains is in [Chapter 8, §8.6](chap-08.md#86-reentrancy-in-grains).
 
-### `GrainOf` and `GrainIdentity`
+### GrainOf and GrainIdentity
 
 `GrainOf` checks that the system is not nil and that `T` is a pointer to a struct (`ErrInvalidGrainKind`), then calls `grainOf` with a nil `T` as a prototype (`GrainOf` in `actor/grain_of.go`). The prototype only names the kind; no instance is built unless this node activates the grain, and then from the registry (`actorSystem.grainOf` in `actor/grain_engine.go`). `GrainIdentity` calls the factory first, on every call, and uses its instance if this node activates a new process (`actorSystem.prepareGrainIdentity` in `actor/grain_engine.go`).
 
@@ -168,7 +168,7 @@ Both then run `activateGrain` (`actor/grain_engine.go`). In order:
 
 The strategy applies only to a grain with no record: the option comments say a grain that exists on another node is activated there instead (`ActivationStrategy` in `actor/grain_option.go`). A send that creates a grain never consults the strategy or the role and always activates on the node that handles the send (`actorSystem.ensureNewGrainProcess` in `actor/grain_engine.go`).
 
-### `TellGrain` and `AskGrain`
+### TellGrain and AskGrain
 
 Outside a cluster both go straight to `localSendGrain`, which finds or activates the grain on this node (`actor/grain_engine.go`). In a cluster they go through `remoteTellGrain` and `remoteAskGrain`:
 
@@ -190,7 +190,7 @@ The fast path checks only that the grain is in the map and active; the comment e
 
 **Other datacenters.** When the registry has no record, `tellGrainAcrossDataCenters` and `askGrainAcrossDataCenters` send the message to every endpoint of every active datacenter in parallel, bounded by the smaller of the datacenter request timeout and the call's timeout, and return on the first success (`actor/grain_engine.go`). Without a datacenter controller, with no records or no active endpoint, they fail at once with `ErrActorNotFound`; a stale cache with fail-on-stale set fails them with `ErrDataCenterStaleRecords`. Whatever the failure, the call then activates the grain here. An ask answered with a nil response counts as not found. [Chapter 22, §22.10](chap-22.md#2210-cross-datacenter-operations) covers the datacenter layer.
 
-**`localSendGrain`** calls `ensureGrainProcess` ([§13.5](#135-activating-on-this-node)). If that reports that another node owns the grain (a `grainOwnerMismatchError`), it forwards the message to that owner with `sendToGrainOwner`, once and never again from here (`actorSystem.localSendGrain` and `actorSystem.sendToGrainOwner` in `actor/grain_engine.go`). Otherwise it hands the message to the local process according to the mode, which [Chapter 14, §14.6](chap-14.md#146-sending-and-waiting) describes.
+**localSendGrain** calls `ensureGrainProcess` ([§13.5](#135-activating-on-this-node)). If that reports that another node owns the grain (a `grainOwnerMismatchError`), it forwards the message to that owner with `sendToGrainOwner`, once and never again from here (`actorSystem.localSendGrain` and `actorSystem.sendToGrainOwner` in `actor/grain_engine.go`). Otherwise it hands the message to the local process according to the mode, which [Chapter 14, §14.6](chap-14.md#146-sending-and-waiting) describes.
 
 ### On the receiving node
 
@@ -244,7 +244,7 @@ Inside the group, the path depends on whether the map has an entry.
 - It claims **before** it admits, rolling the claim back if admission refuses.
 - A claim lost to another node is not an error here: the grain lives there, and `GrainOf` returns the identity.
 
-### `activate`
+### activate
 
 `grainPID.activate` (`actor/grain_pid.go`):
 
@@ -387,7 +387,7 @@ The release itself goes through `retryGrainRegistryWrite` and `cluster.ReleaseGr
 
 For `GrainOf` and `GrainIdentity` ([§13.4](#134-finding-a-grain), step 3), `releaseUnreachableGrainOwner` treats `ErrSystemShuttingDown` and `ErrRemotingDisabled` as refusals even without the mark: its comment points out that an activation request runs no grain handler, so the error can only be the owner's own answer (`actor/grain_engine.go`). A released record lets the call claim the grain and activate it here; a kept record returns the request's error.
 
-### A message from `AskGrain` or `TellGrain`
+### A message from AskGrain or TellGrain
 
 `sendToRecordedGrainOwner` sends the message to the recorded owner through `sendToGrainOwner`, which releases the record when `releaseStaleGrainOwner` says so (`actor/grain_engine.go`). `releaseStaleGrainOwner` reports the message **resendable** only when the record was released **and** the message certainly did not run: the owner refused it, or the request failed to dial. A message that was in flight when its owner went away may have run, so it is not sent again. When the release itself fails, the call returns the message's error joined with the release failure, and sends nothing again.
 

@@ -3,7 +3,7 @@
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
-- [9.1 The `Supervisor` value](#91-the-supervisor-value)
+- [9.1 The Supervisor value](#91-the-supervisor-value)
 - [9.2 From a failure to a decision](#92-from-a-failure-to-a-decision)
 - [9.3 The parent carries it out](#93-the-parent-carries-it-out)
 - [9.4 Restart: budget, backoff and retries](#94-restart-budget-backoff-and-retries)
@@ -28,7 +28,7 @@
 
 Names in [§9.2](#92-from-a-failure-to-a-decision) to [§9.7](#97-reinstate) are in `actor/pid.go` unless another file is named. Names in [§9.1](#91-the-supervisor-value) are in `supervisor/supervisor.go`.
 
-## 9.1 The `Supervisor` value
+## 9.1 The Supervisor value
 
 A `Supervisor` holds a strategy, a set of rules from error type to directive, and the retry and backoff settings (`Supervisor` in `supervisor/supervisor.go`).
 

@@ -5,8 +5,8 @@
 - [What you will learn](#what-you-will-learn)
 - [20.1 The engine and what it delegates](#201-the-engine-and-what-it-delegates)
 - [20.2 Configuration](#202-configuration)
-  - [`ClusterConfig`](#clusterconfig)
-  - [From `ClusterConfig` to the engine](#from-clusterconfig-to-the-engine)
+  - [ClusterConfig](#clusterconfig)
+  - [From ClusterConfig to the engine](#from-clusterconfig-to-the-engine)
 - [20.3 Start and stop](#203-start-and-stop)
 - [20.4 The registry](#204-the-registry)
   - [One map, namespaced keys](#one-map-namespaced-keys)
@@ -36,7 +36,7 @@
   - [Registry repair after a departure](#registry-repair-after-a-departure)
 - [20.11 Network partitions](#2011-network-partitions)
 - [20.12 The peer-state store](#2012-the-peer-state-store)
-- [20.13 Wire messages in `cluster.proto`](#2013-wire-messages-in-clusterproto)
+- [20.13 Wire messages in cluster.proto](#2013-wire-messages-in-clusterproto)
 - [20.14 Olric's log output](#2014-olrics-log-output)
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
@@ -96,7 +96,7 @@ Every registry and membership method except `Events` and `LastRebalanceEvent` fi
 
 ## 20.2 Configuration
 
-### `ClusterConfig`
+### ClusterConfig
 
 Users configure the cluster with `ClusterConfig` (`actor/cluster_config.go`), passed to `WithCluster` (`actor/option.go`). `NewClusterConfig` sets the defaults and registers `FuncActor` ([Chapter 4, §4.8](chap-04.md#48-function-actors)) as a kind. `ClusterConfig.Validate` runs from `actorSystem.validate` in `actor/actor_system.go`, which `NewActorSystem` calls, so an invalid configuration fails construction; it collects every failed assertion, not only the first.
 
@@ -132,7 +132,7 @@ The defaults are in `NewClusterConfig` and the `DefaultCluster...` constants in 
 
 **Quorums are not checked against the replica count by `Validate`.** Olric's own `Config.Validate` (`github.com/tochemey/olric/config/config.go`) rejects a read or write quorum greater than the replica count when the engine creates its Olric instance, so such a configuration fails at `Start`, after the three bootstrap attempts of [§20.3](#203-start-and-stop), not at `NewActorSystem`. The default (two replicas, both quorums 1) deliberately does not satisfy `readQuorum + writeQuorum > replicaCount`. The comments on `WithReplicaCount`, `WithWriteQuorum` and `WithReadQuorum` give the reasons: the registry can be rebuilt, single activation ([Chapter 13, §13.6](chap-13.md#136-one-activation-per-identity)) is decided by the partition's primary owner rather than by overlapping quorums ([§20.6](#206-claims-fences-and-scans)), read repair heals replicas that missed a write, and quorums of 1 keep registry writes succeeding while a node is down. The comment on `WithReplicaCount` says the default of 2 keeps a backup of every partition, so the registry survives the loss of one node and registry-derived crash recovery stays complete; with 1, a crashed node's partitions are lost with it.
 
-### From `ClusterConfig` to the engine
+### From ClusterConfig to the engine
 
 `setupCluster` (`actor/actor_system.go`) builds the engine with `cluster.New`, the system's logger (`WithLogger`) and one engine option per setting: `WithShardCount`, `WithPartitioner`, `WithMinimumMembersQuorum`, `WithMembersWriteQuorum`, `WithMembersReadQuorum`, `WithReplicasCount`, `WithTLS`, `WithWriteTimeout`, `WithReadTimeout`, `WithShutdownTimeout`, `WithDataTableSize`, `WithBootstrapTimeout`, `WithRoutingTableInterval`, `WithBalancerInterval`, `WithConvergenceTimeout` and `WithNetworkProfile` (`internal/cluster/config.go`). Every engine option except `WithNetworkProfile` and `WithTLS` ignores a zero or nil value and keeps the engine default from `defaultConfig`. The engine defaults equal the `ClusterConfig` defaults except the replica count, which is 1 in the engine; the actor system always passes its own value. A `ClusterConfig` timeout of zero therefore reaches the engine as its one-second, three-minute or ten-second default. The TLS settings come from the remote configuration, or from the deprecated `WithTLS` option when the remote configuration has none (`actorSystem.validate`; [Chapter 18, §18.1](chap-18.md#181-tlsinfo-and-where-it-is-set)).
 
@@ -505,7 +505,7 @@ The `Store` interface in `internal/cluster/store.go` keeps `PeerState` records (
 
 A peer state therefore never survives a restart of the node that holds it. `BoltStore.GetPeerState` reports any read or decode error as "not found". `BoltStore.PersistPeerState` opens an empty read transaction after the write; its comment says this makes the write visible to a `NodeLeft` handled on another goroutine. The comment on `WithStoreDir` names the reason to set it: the default path fails on a read-only root filesystem, in a sandbox without a home directory, or wherever the home directory is not writable.
 
-## 20.13 Wire messages in `cluster.proto`
+## 20.13 Wire messages in cluster.proto
 
 `protos/internal/cluster.proto` defines two request and response pairs, served by the remoting server ([Chapter 17](chap-17.md)) and refused with `CODE_FAILED_PRECONDITION` on a node without a cluster and with `CODE_INVALID_ARGUMENT` when the request names another node's address:
 

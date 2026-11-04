@@ -5,7 +5,7 @@
 - [What you will learn](#what-you-will-learn)
 - [The model](#the-model)
 - [Sending messages](#sending-messages)
-- [How a message reaches `Receive`](#how-a-message-reaches-receive)
+- [How a message reaches Receive](#how-a-message-reaches-receive)
 - [The repository](#the-repository)
   - [Dependency layers](#dependency-layers)
   - [Public and internal](#public-and-internal)
@@ -71,7 +71,7 @@ Their error contract:
 
 `BatchAsk` is easy to misread. It is not pipelined: each message waits for its reply before the next one is sent. It returns a buffered, already closed channel holding the replies in order; on error it returns a `nil` channel and no partial results (`BatchAsk` in `actor/api.go`).
 
-## How a message reaches `Receive`
+## How a message reaches Receive
 
 This is the local path. Later chapters take each step apart: the reply side in [Chapter 5, §5.3](chap-05.md#53-how-a-reply-gets-back), the mailboxes in [Chapter 6](chap-06.md), the workers in [Chapter 7](chap-07.md).
 
@@ -155,10 +155,10 @@ An arrow points from a package to a package it imports. The `errors → passivat
 
 Keep four facts from the import graph in mind:
 
-- **`actor` is the only package that ties everything together.** Remoting, clustering, distributed data and reliable delivery all have their entry points in `actor`, not in their own packages. When you look for "where does X start", start in `actor`.
-- **Among library packages, only `stream` and `testkit` import `actor`.** Apart from the `playground/` programs, nothing else does, so lower packages cannot call back into the actor system except through interfaces passed down to them.
-- **`crdt`, `discovery`, `extension`, `hash`, `log`, `memory` and `tls` are leaves.** They import no other package of the module. `errors` is close to the bottom but is not a leaf: it imports `passivation`, which imports `internal/duration`.
-- **`internal/cluster` does not import `actor`.** Cluster membership events are delivered to the actor system through a channel (`cluster.Events()`), which `actor` drains in its own loop (`actorSystem.clusterEventsLoop` in `actor/actor_system.go`; [Chapter 20, §20.9](chap-20.md#209-cluster-events)).
+- **actor is the hub.** Remoting, clustering, distributed data and reliable delivery all have their entry points in `actor`, not in their own packages. When you look for "where does X start", start in `actor`.
+- **stream and testkit import actor.** Apart from the `playground/` programs, nothing else does, so lower packages cannot call back into the actor system except through interfaces passed down to them.
+- **Several packages are leaves.** `crdt`, `discovery`, `extension`, `hash`, `log`, `memory` and `tls` import no other package of the module. `errors` is close to the bottom but is not a leaf: it imports `passivation`, which imports `internal/duration`.
+- **internal/cluster does not import actor.** Cluster membership events are delivered to the actor system through a channel (`cluster.Events()`), which `actor` drains in its own loop (`actorSystem.clusterEventsLoop` in `actor/actor_system.go`; [Chapter 20, §20.9](chap-20.md#209-cluster-events)).
 
 ### Public and internal
 

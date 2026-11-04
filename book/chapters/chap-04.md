@@ -4,17 +4,17 @@
 
 - [What you will learn](#what-you-will-learn)
 - [4.1 The spawn entry points](#41-the-spawn-entry-points)
-- [4.2 The local `Spawn` path, step by step](#42-the-local-spawn-path-step-by-step)
-- [4.3 Inside `newPID`](#43-inside-newpid)
-  - [`PostStart` is always the first message](#poststart-is-always-the-first-message)
+- [4.2 The local Spawn path, step by step](#42-the-local-spawn-path-step-by-step)
+- [4.3 Inside newPID](#43-inside-newpid)
+  - [PostStart is always the first message](#poststart-is-always-the-first-message)
   - [The PID struct is laid out for the cache](#the-pid-struct-is-laid-out-for-the-cache)
   - [State is one bitmask](#state-is-one-bitmask)
   - [Local and remote PIDs share one type](#local-and-remote-pids-share-one-type)
-- [4.4 `PreStart`: retries and the timeout that is not one](#44-prestart-retries-and-the-timeout-that-is-not-one)
+- [4.4 PreStart: retries and the timeout that is not one](#44-prestart-retries-and-the-timeout-that-is-not-one)
 - [4.5 Names, addresses and identity](#45-names-addresses-and-identity)
   - [The address](#the-address)
   - [Name rules](#name-rules)
-  - [What `Equals` compares](#what-equals-compares)
+  - [What Equals compares](#what-equals-compares)
 - [4.6 Children](#46-children)
 - [4.7 Looking up, killing and restarting by name](#47-looking-up-killing-and-restarting-by-name)
 - [4.8 Function actors](#48-function-actors)
@@ -47,7 +47,7 @@ Methods named without a type are on the actor system (`actorSystem` in `actor/ac
 
 With `WithHostAndPort`, `Spawn` creates nothing locally. It fails with `ErrRemotingDisabled` when remoting is off, sends a `RemoteSpawn` request that names the actor's kind, and returns a remote PID (`actorSystem.Spawn`; the transport is [Chapter 15](chap-15.md), the client call [Chapter 16, §16.1](chap-16.md#161-the-client-and-its-operations)). The kind must be registered on the target node, which instantiates it and calls its own `Spawn`, so the local path below runs there ([Chapter 17, §17.6](chap-17.md#176-actor-lifecycle-and-query-handlers); `actorSystem.remoteSpawnHandler` in `actor/remote_server.go`). The request carries the same settings `SpawnOn` sends, the dispatcher name included. The rest of this chapter follows the local path.
 
-## 4.2 The local `Spawn` path, step by step
+## 4.2 The local Spawn path, step by step
 
 ```mermaid
 sequenceDiagram
@@ -131,7 +131,7 @@ If the tree already holds this ID with a *different* PID, a concurrent spawn won
 
 **Step 8. Start and count.** `attachAndPublish` then calls `PID.firePostStartFrom` to schedule the turn that delivers `PostStart` ([§4.3](#poststart-is-always-the-first-message)), and `recordActorSpawned` updates the per-kind metric ([Chapter 12, §12.4](chap-12.md#124-opentelemetry-instruments)). It derives the kind name with `types.Name`, which requires a pointer; this is one of the places that makes pointer actors a requirement ([Chapter 1](chap-01.md)). Back in `completeSpawn`, a reliable-delivery endpoint then gets its controller (`ensureReliableCompanion`), and a companion that cannot start rolls the endpoint back (`rollbackReliableSpawn`, [Chapter 23](chap-23.md)).
 
-## 4.3 Inside `newPID`
+## 4.3 Inside newPID
 
 `newPID` (`actor/pid.go`):
 
@@ -146,7 +146,7 @@ If the tree already holds this ID with a *different* PID, a concurrent spawn won
 
 The first turn is not scheduled in `newPID`. `attachAndPublish` schedules it once the actor is in the tree and, in a cluster, in the registry, and `attachSystemActor` does the same for system actors. A child spawned from its parent's turn is queued on that turn's worker when the worker belongs to the child's dispatcher, as a message the turn sends is; any other spawn goes through the dispatcher's ready queue ([Chapter 7, §7.5](chap-07.md#75-the-ready-queue); `PID.firePostStart`, `PID.firePostStartFrom` and `PID.scheduleFrom` in `actor/pid.go`).
 
-### `PostStart` is always the first message
+### PostStart is always the first message
 
 `init` arms `PostStart` in a dedicated slot (`PID.armPostStart`) *before* setting `runningState`. A turn runs the pending `PostStart` before each message, the system queue's included (`PID.runPendingPostStart` in `PID.runTurn`, [Chapter 7, §7.3](chap-07.md#73-one-turn)), and the slot is separate from both queues, so a full bounded mailbox ([Chapter 6, §6.4](chap-06.md#64-bounded-mailboxes)) cannot refuse it. Even if a user message, a child's `Terminated` or a `PanicSignal` arrives first, the actor sees `PostStart` first. The ordering is deliberate: from the moment `runningState` is set, senders can reach the actor.
 
@@ -221,7 +221,7 @@ Two mutexes complete the picture. `stopLocker` serialises the two ways an actor 
 
 A remote PID is the same struct with only `address`, `path` and `remoting` set, plus `remoteState` (`newRemotePID` in `actor/pid.go`). Most public methods branch on `IsRemote()`. The identity methods `ID`, `Name`, `Path` and `Equals` do not: they read the path, which a remote PID carries like a local one. Some of those branches are hidden network calls ([Chapter 16](chap-16.md)). For example, `ProcessedCount` and `RestartCount` on a remote PID each issue a `RemoteMetric` RPC with `context.Background()`, so the call has no deadline, and they return 0 when the call fails. `ActorSystem()` returns `nil` for a remote PID.
 
-## 4.4 `PreStart`: retries and the timeout that is not one
+## 4.4 PreStart: retries and the timeout that is not one
 
 `PID.init` (`actor/pid.go`) calls `PreStart` once directly, and only when that attempt fails does it build the retry machinery and run the remaining attempts through `internal/retry`:
 
@@ -289,7 +289,7 @@ An address is validated once. `Validate` memoises its result (`validateOnce`), a
 
 The pattern is matched against `strings.TrimSpace(name)` but the name is kept as given. A name with a trailing space is accepted, becomes part of the address, and cannot be found by its trimmed form. `Spawn`'s comment documents it and tells callers to trim names that come from input (`actor/spawn.go`).
 
-### What `Equals` compares
+### What Equals compares
 
 | Comparison | Compares | Source |
 |---|---|---|

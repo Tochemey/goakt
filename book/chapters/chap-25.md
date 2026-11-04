@@ -451,7 +451,7 @@ An endpoint accepts one subscription; a second subscriber receives `streamErrorW
 - **Refill batching.** One `streamRequest` covers a window of elements.
 - **Fusion** ([§25.7](#257-stage-fusion)).
 - **Batching.** Each element between two stages costs one mailbox enqueue and dequeue. `Batch(n, maxWait)` turns `n` elements into one message for everything downstream of it.
-- **`FromChannel`** batches up to 64 values per message, within the outstanding demand. **`FromConn`** reads into pooled buffers of `bufSize` (default 4,096) and emits an exact-sized copy.
+- **FromChannel** batches up to 64 values per message, within the outstanding demand. **FromConn** reads into pooled buffers of `bufSize` (default 4,096) and emits an exact-sized copy.
 
 ## 25.14 Protocol sequence
 

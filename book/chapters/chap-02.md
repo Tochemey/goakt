@@ -4,7 +4,7 @@
 
 - [What you will learn](#what-you-will-learn)
 - [Everything runs in a container](#everything-runs-in-a-container)
-  - [`vendor/` is not committed](#vendor-is-not-committed)
+  - [vendor is not committed](#vendor-is-not-committed)
 - [Running one test while you read](#running-one-test-while-you-read)
 - [How the full suite is split](#how-the-full-suite-is-split)
 - [Generated code](#generated-code)
@@ -21,7 +21,9 @@
 
 ## Everything runs in a container
 
-The `make` targets `vendor`, `lint`, `unit-test`, `mock`, `protogen`, `proto-format`, `proto-lint` and `certs` run inside a Docker image built from `Dockerfile.tools` (`make image`), so the only host requirements are Docker and Make (`Makefile`). `book-check` runs in stock Python and Node images instead, and `book-affected` in the Python one. The image pins the tools:
+The `make` targets `vendor`, `lint`, `unit-test`, `mock`, `protogen`, `proto-format`, `proto-lint` and `certs` run inside a Docker image built from `Dockerfile.tools` (`make image`). The only host requirements are Docker and Make (`Makefile`).
+
+`book-check` runs in stock Python and Node images instead, and `book-affected` in the Python one. The tools image pins:
 
 | Tool | Version |
 |---|---|
@@ -37,9 +39,11 @@ All versions are `ARG` lines in `Dockerfile.tools`, except Go, which is the `FRO
 - `protoc-gen-go` is installed at `latest`, so regenerating protobuf code on two different days can produce different output.
 - `make unit-test` does not use the image's `GOFLAGS`. The shard containers set `GOFLAGS=-mod=readonly` and `GOTOOLCHAIN=local`, as the CI jobs do, and take their modules from the image's pre-downloaded cache rather than from `vendor/` (`scripts/unit-test.sh`, `Dockerfile.tools`).
 
-### `vendor/` is not committed
+### vendor is not committed
 
-`vendor` is in `.gitignore`. The tools image sets `GOFLAGS=-mod=vendor` (`Dockerfile.tools`), so `make lint`, `make mock` and `make protogen` read modules from `vendor/`, and golangci-lint is configured with `modules-download-mode: vendor` (`.golangci.yml`). CI creates `vendor/` with `go mod tidy && go mod vendor` before its lint, cross-compile and unit-test jobs (`.github/workflows/pr.yml`). On a fresh clone, run `make vendor` first (`Makefile`); it runs the two commands in the image with `GOFLAGS` cleared.
+`vendor` is in `.gitignore`. The tools image sets `GOFLAGS=-mod=vendor` (`Dockerfile.tools`), so `make lint`, `make mock` and `make protogen` read modules from `vendor/`. golangci-lint also uses `modules-download-mode: vendor` (`.golangci.yml`).
+
+CI creates `vendor/` with `go mod tidy && go mod vendor` before its lint, cross-compile and unit-test jobs (`.github/workflows/pr.yml`). On a fresh clone, run `make vendor` first (`Makefile`); it runs the same two commands in the image with `GOFLAGS` cleared.
 
 ## Running one test while you read
 
@@ -96,7 +100,7 @@ The opaque API changes how every protobuf message is used in this codebase. Gene
 
 `make lint` enables eight linters (`gocyclo`, `gosec`, `misspell`, `revive`, `staticcheck`, `whitespace`, `govet`, `goheader`) and the `gofmt` and `goimports` formatters (`.golangci.yml`). Test files are linted too (`tests: true`) and `mocks/` is excluded. Two of the linters shape every file you will read:
 
-- **`goheader`** requires the exact MIT license header, including the year range `2022-2026`, at the top of every Go file (`.golangci.yml`).
-- **`misspell`** runs with the US locale but whitelists British spellings (`.golangci.yml`). Comments say "behaviour", "serialise" and "cancelled", and the linter accepts them.
+- **goheader** requires the exact MIT license header, including the year range `2022-2026`, at the top of every Go file (`.golangci.yml`).
+- **misspell** runs with the US locale but whitelists British spellings (`.golangci.yml`). Comments say "behaviour", "serialise" and "cancelled", and the linter accepts them.
 
 House style uses `x` as the method receiver name in most of the code (`func (x *actorSystem) Start(...)`; [Chapter 3](chap-03.md)). Some older types keep their own: `pid` on `PID` in `actor/pid.go` ([Chapter 4](chap-04.md)), `rctx` on `ReceiveContext` in `actor/receive_context.go` ([Chapter 8](chap-08.md)). revive's `receiver-naming` rule, part of the default rules that `.golangci.yml` enables, rejects two receiver names for one type within a file, so a method added to such a file keeps the file's name.

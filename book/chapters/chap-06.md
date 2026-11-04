@@ -11,8 +11,8 @@
   - [Generations and stale claims](#generations-and-stale-claims)
 - [6.3 Choosing a mailbox](#63-choosing-a-mailbox)
 - [6.4 Bounded mailboxes](#64-bounded-mailboxes)
-  - [`BoundedMailbox`: blocking](#boundedmailbox-blocking)
-  - [`NonBlockingBoundedMailbox`: dropping](#nonblockingboundedmailbox-dropping)
+  - [BoundedMailbox: blocking](#boundedmailbox-blocking)
+  - [NonBlockingBoundedMailbox: dropping](#nonblockingboundedmailbox-dropping)
 - [6.5 Priority mailboxes](#65-priority-mailboxes)
 - [6.6 The fair mailbox](#66-the-fair-mailbox)
 - [6.7 The segmented mailbox](#67-the-segmented-mailbox)
@@ -154,7 +154,7 @@ Every mailbox is passed as a value to `WithMailbox`, or to `WithFuncMailbox` for
 
 ## 6.4 Bounded mailboxes
 
-### `BoundedMailbox`: blocking
+### BoundedMailbox: blocking
 
 `BoundedMailbox` wraps the ring buffer from `github.com/Workiva/go-datastructures/queue` (`NewBoundedMailbox` in `actor/bounded_mailbox.go`). Three properties come from that library rather than from GoAkt:
 
@@ -166,7 +166,7 @@ GoAkt adds a fourth rule for **remote messages**. A message that arrived over re
 
 `Dequeue` returns nil when the ring's length is zero and calls the ring's `Get` only when it is positive (`BoundedMailbox.Dequeue`). See [Behaviours to know](#behaviours-to-know) for the one window in which that `Get` waits.
 
-### `NonBlockingBoundedMailbox`: dropping
+### NonBlockingBoundedMailbox: dropping
 
 `NonBlockingBoundedMailbox` is Dmitry Vyukov's bounded queue, written in GoAkt (`actor/non_blocking_bounded_mailbox.go`). Every cell carries a sequence number. A producer claims a cell by advancing `enqueuePos` with a compare-and-swap when the cell's sequence equals the position, then stores the message and publishes it by advancing the sequence. When the cell still holds an unconsumed message, the sequence is behind the position, and `Enqueue` returns `ErrMailboxFull` instead of waiting. The consumer does the mirror image (`NonBlockingBoundedMailbox.Dequeue`).
 
@@ -178,7 +178,7 @@ A `PriorityFunc` is `func(msg1, msg2 any) bool`, and returning true means `msg1`
 
 There are two designs:
 
-- **`UnboundedPriorityMailBox`** pushes into a `container/heap` under a mutex (`UnboundedPriorityMailBox.Enqueue` and `UnboundedPriorityMailBox.Dequeue` in `actor/unbounded_priority_mailbox.go`). A binary heap is not stable, so messages the function ranks equally come out in no particular order. Its comment says so, and recommends the stable variant when ties must keep their order.
+- **UnboundedPriorityMailBox** pushes into a `container/heap` under a mutex (`UnboundedPriorityMailBox.Enqueue` and `UnboundedPriorityMailBox.Dequeue` in `actor/unbounded_priority_mailbox.go`). A binary heap is not stable, so messages the function ranks equally come out in no particular order. Its comment says so, and recommends the stable variant when ties must keep their order.
 - **The other three** split producers from the heap. Producers push onto a lock-free stack, the *intake* (`priorityIntake` in `actor/priority_intake.go`). Before each `Dequeue`, the consumer takes the whole stack in one swap and reverses it into arrival order (`priorityIntake.drain`), then pushes it into a heap only it touches. Producers never contend with the consumer, and nothing is allocated per message.
 
 The stable variants give each drained message an increasing sequence number and use it to break ties (`stableHeap.less` in `actor/unbounded_stable_priority_mailbox.go`). Deciding a tie takes two calls to the priority function, one in each direction.
@@ -205,8 +205,8 @@ Nothing removes a sender's sub-queue, so the mailbox keeps one per distinct send
 
 `UnboundedSegmentedMailbox` stores messages in arrays of 256 slots linked into a list (`segmentSize`, `segment` and `newSegment` in `actor/unbounded_segmented_mailbox.go`):
 
-- **`Enqueue`** loads the tail segment, reserves a slot with an atomic add on its write index, and stores the message there. When the index passes 255, the producer links a new segment, or helps move the tail to one another producer linked, and retries.
-- **`Dequeue`** reads slots in order. A slot that is reserved but not yet written makes it return nil, "not yet published; treat as empty".
+- **Enqueue** loads the tail segment, reserves a slot with an atomic add on its write index, and stores the message there. When the index passes 255, the producer links a new segment, or helps move the tail to one another producer linked, and retries.
+- **Dequeue** reads slots in order. A slot that is reserved but not yet written makes it return nil, "not yet published; treat as empty".
 
 Two details keep the list consistent under concurrent producers:
 

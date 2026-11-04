@@ -6,7 +6,7 @@
 - [22.1 One cluster per datacenter](#221-one-cluster-per-datacenter)
 - [22.2 Records, states and wire format](#222-records-states-and-wire-format)
 - [22.3 Configuration and validation](#223-configuration-and-validation)
-- [22.4 The `ControlPlane` contract](#224-the-controlplane-contract)
+- [22.4 The ControlPlane contract](#224-the-controlplane-contract)
 - [22.5 The NATS JetStream control plane](#225-the-nats-jetstream-control-plane)
 - [22.6 The etcd control plane](#226-the-etcd-control-plane)
 - [22.7 The datacenter controller](#227-the-datacenter-controller)
@@ -130,7 +130,7 @@ Multi-datacenter is configured with a `Config` (`datacenter/config.go`) handed t
 
 The control planes have their own configs ([§22.5](#225-the-nats-jetstream-control-plane), [§22.6](#226-the-etcd-control-plane)). Nothing checks that a control plane's TTL is longer than `HeartbeatInterval`.
 
-## 22.4 The `ControlPlane` contract
+## 22.4 The ControlPlane contract
 
 `ControlPlane` (`datacenter/control_plane.go`) is the provider interface. Its comment states four rules: records are leased and `Heartbeat` renews the lease; updates are versioned, so a mutation takes the caller's current version and returns a new one; every method honours its context; implementations should be safe for concurrent use.
 

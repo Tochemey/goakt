@@ -1,9 +1,9 @@
-# 17. Remoting: the Remote Server and the `remote` Package
+# 17. Remoting: the Remote Server and the remote Package
 
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
-- [17.1 The `remote` package](#171-the-remote-package)
+- [17.1 The remote package](#171-the-remote-package)
   - [Config](#config)
   - [Options](#options)
   - [Compression and the protocol pin](#compression-and-the-protocol-pin)
@@ -15,7 +15,7 @@
   - [Built-in serializers of the actor system](#built-in-serializers-of-the-actor-system)
 - [17.3 Choosing a serializer](#173-choosing-a-serializer)
   - [Registration](#registration)
-  - [`Config.Serializer`](#configserializer)
+  - [Config.Serializer](#configserializer)
   - [What the actor system uses](#what-the-actor-system-uses)
 - [17.4 The server](#174-the-server)
   - [Start](#start)
@@ -33,7 +33,7 @@
 - [17.7 Grain entry points](#177-grain-entry-points)
 - [17.8 The remote watch registry](#178-the-remote-watch-registry)
 - [17.9 The remote hold registry](#179-the-remote-hold-registry)
-- [17.10 `internal/codec`](#1710-internalcodec)
+- [17.10 internal/codec](#1710-internalcodec)
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
@@ -47,7 +47,7 @@
 - How the remote watch registry ([death watch across nodes](chap-09.md#99-remote-watch)) and the remote hold registry ([flow-control credit](chap-15.md#158-flow-control)) keep cross-node state outside the actor tree.
 - What `internal/codec` converts, and which details of a [supervisor](chap-09.md#91-the-supervisor-value), a [passivation strategy](chap-10.md#101-strategies) or a [reentrancy](chap-08.md#85-reentrancy-requests-that-do-not-block) setting survive the trip.
 
-## 17.1 The `remote` package
+## 17.1 The remote package
 
 `remote` is the public face of remoting. It holds no network code: the transport is `internal/net` ([Chapter 15](chap-15.md)) and the outbound client is `internal/remoteclient` ([Chapter 16](chap-16.md), Remote Client). It holds values that both sides of a connection, and users, need to name.
 
@@ -160,8 +160,8 @@ CBOR encodes without key sorting, forbids indefinite lengths and decodes at most
 
 Two actor messages travel with their own unexported serializers, which `actorSystem.setupRemoting` in `actor/actor_system.go` registers on the client before any user serializer:
 
-- **`PoisonPill`**: the whole frame is the fixed 8 bytes `DE AD BE EF CA FE BA BE`. `Deserialize` accepts exactly those 8 bytes and nothing else (`poisonPillSerializer` in `actor/poison_pill_serializer.go`).
-- **`Terminated`** ([death watch](chap-09.md#98-death-watch)): an 8-byte magic `DE AD AC 70 52 BE EF ED`, the path length as a `uint32`, the path text, and the time as Unix nanoseconds in an `int64`. `Deserialize` requires the magic, an exact total length and a parseable address; an empty path gives a `Terminated` with no path (`terminatedSerializer` in `actor/terminated_serializer.go`).
+- **PoisonPill**: the whole frame is the fixed 8 bytes `DE AD BE EF CA FE BA BE`. `Deserialize` accepts exactly those 8 bytes and nothing else (`poisonPillSerializer` in `actor/poison_pill_serializer.go`).
+- **Terminated** ([death watch](chap-09.md#98-death-watch)): an 8-byte magic `DE AD AC 70 52 BE EF ED`, the path length as a `uint32`, the path text, and the time as Unix nanoseconds in an `int64`. `Deserialize` requires the magic, an exact total length and a parseable address; an empty path gives a `Terminated` with no path (`terminatedSerializer` in `actor/terminated_serializer.go`).
 
 Both magics read as a `totalLen` larger than the frame that carries them, so neither passes for the shared frame. `setupRemoting` also registers the serializers of the [reentrancy](chap-08.md#85-reentrancy-requests-that-do-not-block) envelopes (`AsyncRequest`, `AsyncResponse`) and of the five [reliable-delivery](chap-23.md#234-the-wire-protocol) commands from `internal/commands`.
 
@@ -178,7 +178,7 @@ For a concrete registration, `RegisterSerializerType` in `internal/types/global.
 
 `WithSerializables(msgs...)` and `WithJSONSerializables(msgs...)` do the same for a list, with one shared instance each (`DefaultCBORSerializer` and `DefaultJSONSerializer` in `remote/option.go`, built once with `sync.Once`).
 
-### `Config.Serializer`
+### Config.Serializer
 
 `Config.Serializer(msg)` walks the serializer map and returns the first entry whose type equals the message type or, for an interface entry, is implemented by it; `nil` for a `nil` message or no match (`remote/config.go`). The walk is over a Go map, whose order the language does not define, so an exact-type entry is not ranked above an interface entry and registration order does not decide between entries. `Config.Serializers` returns a copy of the map.
 
@@ -486,7 +486,7 @@ The consumer side is serialised by `consumerMu`, not by the dispatcher. The type
 
 **Where a share is released.** When the message leaves the mailbox (`PID.dispatchOne`); when `PID.doReceive` refuses it because the system is stopping or the mailbox is full; on any failure of [§17.5](#175-tell-and-ask) before it reached the mailbox; when the receive context is reset (`ReceiveContext.releaseRemoteHold` in `actor/receive_context.go`); and at teardown.
 
-## 17.10 `internal/codec`
+## 17.10 internal/codec
 
 `internal/codec` converts runtime values to and from their protobuf form. It has no state.
 

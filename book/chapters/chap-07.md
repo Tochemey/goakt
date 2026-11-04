@@ -3,6 +3,7 @@
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
+- [Scope](#scope)
 - [7.1 The pieces](#71-the-pieces)
   - [Pool size](#pool-size)
   - [Named dispatchers](#named-dispatchers)
@@ -36,9 +37,15 @@
 - How failures leave the turn and reach supervision, and what that delay means.
 - What happens when the pool is saturated, and how named dispatchers isolate blocking work.
 
+## Scope
+
+This chapter covers the dispatcher, ready queue and workers in `actor/dispatcher.go`, `actor/ready_queue.go` and `actor/worker.go`. What sits in a mailbox and how a send enqueues work are in [Chapter 6](chap-06.md) and [Chapter 5](chap-05.md). Grains use the same pool; their turn differs in [Chapter 14, §14.3](chap-14.md#143-scheduling-and-the-turn).
+
 ## 7.1 The pieces
 
-An actor is not a goroutine. The `dispatcher` owns a fixed pool of worker goroutines that take ready actors from a ready queue and run them one *turn* at a time (`actor/dispatcher.go`). An actor or grain is anything with a `runTurn(w *worker)` method, the `schedulable` interface (`actor/ready_queue.go`). The `worker` is intentionally agnostic of the actor state machine, the mailbox and the throughput policy: it takes a schedulable, runs a turn, and takes again (`worker.run` in `actor/worker.go`). Grains are the second kind of schedulable ([Chapter 14, §14.3](chap-14.md#143-scheduling-and-the-turn)).
+The dispatcher is a fixed pool of workers and a ready queue. It lends a worker to an actor or grain for one *turn* at a time; neither owns a goroutine (`dispatcher` in `actor/dispatcher.go`).
+
+An actor or grain that can run on a worker is a `schedulable`: it has a `runTurn(w *worker)` method (`actor/ready_queue.go`). The `worker` is intentionally agnostic of the actor state machine, mailbox and throughput policy. It takes a schedulable, runs a turn and takes again (`worker.run` in `actor/worker.go`). Grains are the second kind of schedulable ([Chapter 14, §14.3](chap-14.md#143-scheduling-and-the-turn)).
 
 ```mermaid
 flowchart TD
@@ -53,7 +60,7 @@ flowchart TD
     RQ -->|"take, steal or park"| W
 ```
 
-The number of workers defaults to `max(GOMAXPROCS, 2)` and is independent of the number of actors; no actor runs a goroutine of its own to drain its [mailbox](chap-06.md) (`dispatcher` in `actor/dispatcher.go`). The dispatcher sits below `PID.doReceive` ([Chapter 5](chap-05.md)); an application tunes it only through the options in the table below. `NewActorSystem` builds the dispatchers once the options are applied, and `Start` starts their workers before any actor is spawned ([Chapter 3, §3.3](chap-03.md#33-start)).
+The number of workers defaults to `max(GOMAXPROCS, 2)` and is independent of the number of actors (`dispatcher` in `actor/dispatcher.go`). The dispatcher sits below `PID.doReceive` ([Chapter 5](chap-05.md)); an application tunes it only through the options in the table below. `NewActorSystem` builds the dispatchers once the options are applied, and `Start` starts their workers before any actor is spawned ([Chapter 3, §3.3](chap-03.md#33-start)).
 
 | Setting | Default | Option |
 |---|---|---|
@@ -119,8 +126,8 @@ stateDiagram-v2
 
 Only `Processing` lets anyone run the actor's handler, and only one party can hold it, so an actor's messages are handled one at a time.
 
-- **`TrySchedule`** reads before it tries the swap: when many producers send at once, all but one see `Scheduled` or `Processing` and return without touching the cache line in exclusive mode. A send therefore costs one atomic read, at most one compare-and-swap and one mailbox operation; only the producer that wins `Idle → Scheduled` also pays for a push onto the ready queue ([§7.5](#where-an-actor-goes)).
-- **`TakeIdleForStop`** is passivation's way in (`PID.tryPassivation` in `actor/pid.go`, [Chapter 10, §10.5](chap-10.md#105-one-attempt), [Chapter 3, §3.5](chap-03.md#35-stop)). When the swap fails because the actor is busy, the attempt is deferred to the passivation manager. When it succeeds but a message arrived in the meantime, the state is reset, the waiting work is scheduled, and the attempt is deferred too.
+- **TrySchedule** reads before it tries the swap: when many producers send at once, all but one see `Scheduled` or `Processing` and return without touching the cache line in exclusive mode. A send therefore costs one atomic read, at most one compare-and-swap and one mailbox operation; only the producer that wins `Idle → Scheduled` also pays for a push onto the ready queue ([§7.5](#where-an-actor-goes)).
+- **TakeIdleForStop** is passivation's way in (`PID.tryPassivation` in `actor/pid.go`, [Chapter 10, §10.5](chap-10.md#105-one-attempt), [Chapter 3, §3.5](chap-03.md#35-stop)). When the swap fails because the actor is busy, the attempt is deferred to the passivation manager. When it succeeds but a message arrived in the meantime, the state is reset, the waiting work is scheduled, and the attempt is deferred too.
 - **A restart** ([Chapter 9, §9.6](chap-09.md#96-the-restart-itself)) forces `Idle` with `reset`. `restartSubtree` in `actor/pid.go` first waits, yielding the processor in a loop, until the state is no longer `Processing`, and forces `Idle` before `init` makes the new incarnation reachable, so no turn can be running when it does.
 
 ### Not losing a wake-up
@@ -134,6 +141,8 @@ A producer enqueues and then calls `TrySchedule` (`PID.doReceive` and `PID.putVa
 Because the reset comes before the check, every message falls into one of two cases. Either it was enqueued before the check, and the turn sees it. Or it was enqueued after the reset, and its producer's `TrySchedule` finds `Idle` and schedules the actor itself.
 
 ## 7.3 One turn
+
+One turn is one bounded visit of an actor by a worker: claim the actor, drain up to the throughput budget, then yield or go idle.
 
 `PID.runTurn` (`actor/pid.go`) starts by claiming the actor with `TakeForProcessing`. A worker that loses this race returns at once: the actor is already owned. It then publishes its worker in `turnWorker`, reads the clock once, records the turn's start for the run-next age rule ([§7.5](#run-next-slot-rules)), and loops for at most the dispatcher's budget of iterations. Each iteration does the first of these that applies:
 
@@ -183,10 +192,10 @@ The reentrancy envelopes, `AsyncRequest` and `AsyncResponse`, are **not** contro
 
 `systemQueue` (`actor/system_queue.go`) is a lock-free stack with a twist that restores send order:
 
-- **`push`** links the message in front of the current top and swings the top with a compare-and-swap, retrying on contention.
-- **`pop`** works from a private batch. When the batch is exhausted, it swaps the whole stack out in one atomic swap and reverses it, so the batch comes out oldest first (`inSendOrder`). Everything in one batch was pushed before everything in the next, so the order across batches is preserved too.
+- **push** links the message in front of the current top and swings the top with a compare-and-swap, retrying on contention.
+- **pop** works from a private batch. When the batch is exhausted, it swaps the whole stack out in one atomic swap and reverses it, so the batch comes out oldest first (`inSendOrder`). Everything in one batch was pushed before everything in the next, so the order across batches is preserved too.
 - **Release** follows the same rule as the mailbox: the previously popped message is recycled on the next `pop`, including a `pop` that returns nil, so an idle actor holds no context.
-- **`isEmpty`** reads only atomics, because `finishOrReclaim` may call it on a worker that has just given up the actor while the next owner is already popping.
+- **isEmpty** reads only atomics, because `finishOrReclaim` may call it on a worker that has just given up the actor while the next owner is already popping.
 
 The idle path, nothing held and nothing pushed, is two loads and no write. That matters because `runTurn` calls `pop` before every user message, and a write would evict a cache line that producers read on every send.
 
@@ -272,8 +281,8 @@ The claim scan always starts at worker 0. That keeps wake-ups on the same few wo
 
 There are two ways to hand an actor to a parked worker, and they differ in what happens to the search:
 
-- **`readyQueue.push`**, for a producer outside the workers or a ring that spilled, hands the actor straight to a parked worker only when no worker is searching. It first takes the `searching` flag for that worker, which ends the search as soon as the worker wakes with the actor, before it runs the turn, so a turn that blocks never keeps other wakes from going out. Otherwise it appends the actor to the global ring and calls `wakeSearcher`. Handing off unconditionally woke a worker per message, and a wake costs the producer a goroutine wake-up and the runtime a thread wake-up, both of which grow with the number of processors (`readyQueue` comment). A worker that is awake now drains a stream of pushes while nobody is woken, and a single sender to a single actor still gets its worker in one step.
-- **`readyQueue.pushHandoff`**, for a caller that blocks until the actor has run (an `Ask`, a grain call from outside the workers), hands the actor to a parked worker whatever the search and without making it the searcher. Its comment gives the reason: the caller's processor is free the moment it blocks, so the worker runs on it at once, and a burst of such callers wakes a worker each instead of queueing behind one searcher. With no worker parked, the actor goes on the global ring and one searcher is woken, as in `push`.
+- **readyQueue.push**, for a producer outside the workers or a ring that spilled, hands the actor straight to a parked worker only when no worker is searching. It first takes the `searching` flag for that worker, which ends the search as soon as the worker wakes with the actor, before it runs the turn, so a turn that blocks never keeps other wakes from going out. Otherwise it appends the actor to the global ring and calls `wakeSearcher`. Handing off unconditionally woke a worker per message, and a wake costs the producer a goroutine wake-up and the runtime a thread wake-up, both of which grow with the number of processors (`readyQueue` comment). A worker that is awake now drains a stream of pushes while nobody is woken, and a single sender to a single actor still gets its worker in one step.
+- **readyQueue.pushHandoff**, for a caller that blocks until the actor has run (an `Ask`, a grain call from outside the workers), hands the actor to a parked worker whatever the search and without making it the searcher. Its comment gives the reason: the caller's processor is free the moment it blocks, so the worker runs on it at once, and a burst of such callers wakes a worker each instead of queueing behind one searcher. With no worker parked, the actor goes on the global ring and one searcher is woken, as in `push`.
 
 ### Why a wake-up cannot be lost
 

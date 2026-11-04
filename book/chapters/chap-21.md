@@ -3,12 +3,12 @@
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
-- [21.1 Placement with `SpawnOn`](#211-placement-with-spawnon)
+- [21.1 Placement with SpawnOn](#211-placement-with-spawnon)
 - [21.2 One name in the whole cluster](#212-one-name-in-the-whole-cluster)
 - [21.3 What relocates](#213-what-relocates)
 - [21.4 Cluster singletons](#214-cluster-singletons)
 - [21.5 Singleton races, crashes and leadership](#215-singleton-races-crashes-and-leadership)
-- [21.6 What every node does on `NodeLeft`](#216-what-every-node-does-on-nodeleft)
+- [21.6 What every node does on NodeLeft](#216-what-every-node-does-on-nodeleft)
 - [21.7 Crash: deriving the relocation set from the registry](#217-crash-deriving-the-relocation-set-from-the-registry)
 - [21.8 Graceful leave: the peer-state snapshot](#218-graceful-leave-the-peer-state-snapshot)
 - [21.9 The relocator and its workers](#219-the-relocator-and-its-workers)
@@ -30,7 +30,7 @@
 - How the relocator, its workers and the `RelocateBatch` handler split, send and recreate the work, and how failures are counted.
 - What the handoff window hides from senders, and why `SendSync` waits while `SendAsync` fails with `ErrRelocationInProgress` ([Chapter 5, §5.8](chap-05.md#58-sending-by-name)).
 
-## 21.1 Placement with `SpawnOn`
+## 21.1 Placement with SpawnOn
 
 `Spawn` always creates the actor on the calling node, or on the node named by `WithHostAndPort` ([Chapter 4, §4.1](chap-04.md#41-the-spawn-entry-points)). `SpawnOn` lets the cluster choose. It is the actor system's only balanced-spawn entry point; the standalone client balances with its own `Client.SpawnBalanced` in `client/client.go` ([Chapter 18](chap-18.md)). In order (`actorSystem.SpawnOn` in `actor/spawn.go`):
 
@@ -183,7 +183,7 @@ A successful run that produced no PID resolves one with `resolveExistingSingleto
 
 **A leadership change.** `handleClusterEvent` only publishes `LeaderChanged` (`actor/actor_system.go`). No code moves a running singleton when the coordinator changes; a singleton moves only when its host leaves. With `WithoutRelocation`, it does not move at all: it is lost with its host.
 
-## 21.6 What every node does on `NodeLeft`
+## 21.6 What every node does on NodeLeft
 
 Membership events reach the actor system through its cluster events loop, one goroutine ([Chapter 20, §20.9](chap-20.md#209-cluster-events)). `handleClusterEvent` ignores events while the system stops or is out of the cluster, publishes `NodeLeft` on the event stream ([Chapter 11, §11.3](chap-11.md#113-the-event-stream)), and calls `handleNodeLeftEvent` (`actor/actor_system.go`). When the departed node's remoting port is cached, the handler first closes the remoting connections to that endpoint. In order:
 
@@ -399,7 +399,7 @@ While a relocation runs, a name can still resolve to the departed node, or brief
 
 **The window.** `relocatingEndpoints` is a TTL map of remoting endpoints with a TTL of `relocationHandoffWindow`, three seconds (`NewActorSystem` in `actor/actor_system.go`). On `NodeLeft`, every node with relocation enabled adds the departed endpoint, using the cached remoting port; with no cached port it adds nothing (`actorSystem.markEndpointRelocating` in `actor/relocation_handoff.go`). A `NodeJoined` at the same peers address deletes it early, so a node that restarted in place is not stalled (`actorSystem.markEndpointRecovered` in `actor/relocation_handoff.go`). `relocationInFlight` asks the map for its **active** entries, not its length: entries are only evicted on a write, and a length check would read true forever after the first departure (comment on `actorSystem.relocationInFlight`).
 
-**`SendSync`** uses `PID.deliverAcrossHandoff` (`actor/relocation_handoff.go`). It resolves the name once; outside a cluster it delivers at once. Otherwise it loops:
+**SendSync** uses `PID.deliverAcrossHandoff` (`actor/relocation_handoff.go`). It resolves the name once; outside a cluster it delivers at once. Otherwise it loops:
 
 | Resolution | Action | Bound | Error when the bound is reached |
 |---|---|---|---|
@@ -410,7 +410,7 @@ While a relocation runs, a name can still resolve to the departed node, or brief
 
 Retryable errors are `ErrActorNotFound`, `ErrAddressNotFound`, `ErrRemoteSendFailure`, `ErrRequestTimeout`, `ErrRelocationInProgress`, a deadline, a refused connection and a network timeout (`isHandoffRetryable` in `actor/relocation_handoff.go`). Waits start at 50 ms and double up to 300 ms, never past the bound (`sleepWithinHandoff`). The short not-found bound keeps a name that never existed fast to fail during someone else's relocation. The caller's timeout covers the masking and the delivery together, so a masked `SendSync` with a two-second timeout does not block for four. The first wait of a send counts once in `actorsystem.relocation.buffered.count` ([Chapter 12, §12.4](chap-12.md#124-opentelemetry-instruments); `actorSystem.recordRelocationHandoff` in `actor/actor_system.go`).
 
-**`SendAsync`** uses `PID.deliverBypassingHandoff` (`actor/relocation_handoff.go`): one resolution, and a remote PID on an endpoint in its window fails at once with **`ErrRelocationInProgress`**, "a retryable signal" rather than a connection error. It never sleeps, because it also backs `ReceiveContext.SendAsync` inside actor turns (`PID.SendAsync` in `actor/pid.go`). Both send paths then fall back to other data centers on `ErrActorNotFound` ([Chapter 22, §22.10](chap-22.md#2210-cross-datacenter-operations)).
+**SendAsync** uses `PID.deliverBypassingHandoff` (`actor/relocation_handoff.go`): one resolution, and a remote PID on an endpoint in its window fails at once with **ErrRelocationInProgress**, "a retryable signal" rather than a connection error. It never sleeps, because it also backs `ReceiveContext.SendAsync` inside actor turns (`PID.SendAsync` in `actor/pid.go`). Both send paths then fall back to other data centers on `ErrActorNotFound` ([Chapter 22, §22.10](chap-22.md#2210-cross-datacenter-operations)).
 
 The window applies only to these two by-name sends. `Tell` and `Ask` on a PID already held ([Chapter 5, §5.1](chap-05.md#51-three-ways-to-send)) are not masked.
 

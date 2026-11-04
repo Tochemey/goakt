@@ -4,7 +4,7 @@
 
 - [What you will learn](#what-you-will-learn)
 - [3.1 One interface, one struct](#31-one-interface-one-struct)
-- [3.2 Construction: `NewActorSystem`](#32-construction-newactorsystem)
+- [3.2 Construction: NewActorSystem](#32-construction-newactorsystem)
 - [3.3 Start](#33-start)
   - [Phase 1: before the chain](#phase-1-before-the-chain)
   - [Phase 2: the startup chain](#phase-2-the-startup-chain)
@@ -16,11 +16,11 @@
   - [How the tree stores it](#how-the-tree-stores-it)
 - [3.5 Stop](#35-stop)
   - [Leaving the cluster](#leaving-the-cluster)
-  - [How one actor stops: `PID.Shutdown`](#how-one-actor-stops-pidshutdown)
+  - [How one actor stops: PID.Shutdown](#how-one-actor-stops-pidshutdown)
   - [Passivation stops only an idle actor](#passivation-stops-only-an-idle-actor)
 - [3.6 Coordinated shutdown hooks](#36-coordinated-shutdown-hooks)
 - [3.7 Starting again](#37-starting-again)
-- [3.8 `Run`](#38-run)
+- [3.8 Run](#38-run)
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
@@ -57,10 +57,10 @@ The struct (`actorSystem` in `actor/actor_system.go`) is easier to read as group
 Three kinds of synchronisation coexist in the struct, and knowing which applies to a field saves a lot of reading:
 
 - **Atomics** for flags and counters that hot paths read.
-- **`locker sync.RWMutex`**, described only as "help protect some the fields to set" (`actorSystem` in `actor/actor_system.go`). In practice it guards fields that are replaced at runtime and read by actor turns, such as `clusterStore` and `dataCenterController` (`actorSystem.reset` in `actor/actor_system.go`), and the guardian PIDs, which `getRootGuardian` and its siblings read under its read lock.
+- **Locker.** `locker sync.RWMutex` is described only as "help protect some the fields to set" (`actorSystem` in `actor/actor_system.go`). In practice it guards fields that are replaced at runtime and read by actor turns, such as `clusterStore` and `dataCenterController` (`actorSystem.reset` in `actor/actor_system.go`), and the guardian PIDs, which `getRootGuardian` and its siblings read under its read lock.
 - **Dedicated mutexes** for single structures: `relocationJobsLocker`, `actorKindsLocker`, `dataCenterControllerMutex`, `dataCenterLeaderMutex`.
 
-## 3.2 Construction: `NewActorSystem`
+## 3.2 Construction: NewActorSystem
 
 `NewActorSystem` (`actor/actor_system.go`) builds a system without starting anything: no goroutine runs and no actor exists when it returns. It works in six steps.
 
@@ -280,7 +280,7 @@ If step 8 or step 10 fails, `shutdown` jumps straight to the cluster and remotin
 
 Persistence takes every peer sorted oldest first, because the oldest member is the cluster coordinator (`actorSystem.selectOldestPeers` in `actor/actor_system.go`; [Chapter 20, §20.8](chap-20.md#208-peers-members-and-the-leader)). It sends to groups of three in parallel (`defaultReplicationFactor`) and returns as soon as two acknowledge (`defaultReplicationQuorum`, `actor/actor_system.go`). When the group finishes with fewer, one acknowledgement is accepted as partial success; none is an error, unless every peer of the group is leaving (below). The next group is tried only when every peer of the current group answers that it is itself leaving (`actorSystem.persistPeerStateToPeers` and `isPeerLeaving` in `actor/actor_system.go`). A peer counts as leaving when it refuses the state with `ErrRemotingDisabled` or `ErrClusterDisabled`, refuses the connection, or closes it under the request (a reset, an end of stream, or a closed duplex session): a running node keeps its remoting port open and its peers' connections up, while a stopping node closes them ([Chapter 15](chap-15.md)). A peer that does not answer in time is not counted as leaving.
 
-### How one actor stops: `PID.Shutdown`
+### How one actor stops: PID.Shutdown
 
 Every step above that stops an actor ends in `PID.Shutdown` (`actor/pid.go`; [Chapter 4](chap-04.md)), which makes the first two checks and then calls `PID.stop` for the last two:
 
@@ -345,7 +345,7 @@ A system can be started again after `Stop`, and after a `Start` that failed. `St
 
 The test suite checks both cases: a restart after `Stop`, with an extension and an eviction strategy configured (`TestActorSystem` in `actor/actor_system_test.go`), and a restart after a failed `Start` (`TestStartupCleanup` in `actor/actor_system_test.go`). In both, a spawned actor must answer an `Ask`.
 
-## 3.8 `Run`
+## 3.8 Run
 
 `Run` (`actor/actor_system.go`) is a convenience wrapper over `Start` and `Stop` ([§3.3](#33-start), [§3.5](#35-stop)) with process-level side effects:
 
