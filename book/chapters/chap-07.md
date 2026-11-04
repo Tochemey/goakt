@@ -48,12 +48,12 @@ flowchart TD
         L["local ring per worker (256 slots)"]
         G["global ring (64 slots, doubles when full)"]
     end
-    W["workers W0 ... Wn-1<br/>n = max(GOMAXPROCS, 2) by default"]
+    W["workers<br/>one goroutine each"]
     P -->|"enqueue, then TrySchedule: Idle to Scheduled"| RQ
     RQ -->|"take, steal or park"| W
 ```
 
-The number of workers defaults to `GOMAXPROCS` and is independent of the number of actors; no actor runs a goroutine of its own to drain its [mailbox](chap-06.md) (`dispatcher` in `actor/dispatcher.go`). The dispatcher sits below `PID.doReceive` ([Chapter 5](chap-05.md)); an application tunes it only through the options in the table below. `NewActorSystem` builds the dispatchers once the options are applied, and `Start` starts their workers before any actor is spawned ([Chapter 3, §3.3](chap-03.md#33-start)).
+The number of workers defaults to `max(GOMAXPROCS, 2)` and is independent of the number of actors; no actor runs a goroutine of its own to drain its [mailbox](chap-06.md) (`dispatcher` in `actor/dispatcher.go`). The dispatcher sits below `PID.doReceive` ([Chapter 5](chap-05.md)); an application tunes it only through the options in the table below. `NewActorSystem` builds the dispatchers once the options are applied, and `Start` starts their workers before any actor is spawned ([Chapter 3, §3.3](chap-03.md#33-start)).
 
 | Setting | Default | Option |
 |---|---|---|
