@@ -39,7 +39,7 @@ go get github.com/tochemey/goakt/v4
 
 ## Examples
 
-See the [examples repository](https://github.com/Tochemey/goakt-benchmarks) for runnable code covering local, remote, and clustered actor systems.
+See the [examples repository](https://github.com/Tochemey/goakt-examples) for runnable code covering local, remote, and clustered actor systems.
 
 ## Benchmarks
 
